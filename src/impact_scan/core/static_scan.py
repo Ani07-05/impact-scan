@@ -7,6 +7,16 @@ from impact_scan.utils import schema
 
 
 
+def run_scan(scan_config: schema.ScanConfig) -> List[schema.Finding]:
+    """
+    Runs the static analysis scan using Bandit.
+    """
+    print("Starting static analysis scan...")
+    findings = scan_for_static_issues(scan_config.root_path)
+    print(f"Found {len(findings)} static analysis issues.")
+    return findings
+
+
 def scan_for_static_issues(root_path: Path) -> List[schema.Finding]:
     """
     Runs Bandit to find static analysis vulnerabilities in Python code.
@@ -63,6 +73,7 @@ def _parse_bandit_output(json_output: str) -> List[schema.Finding]:
                 file_path=Path(file_path_str),
                 line_number=line_number,
                 vuln_id=result.get("test_id"),
+                rule_id=result.get("test_id"),
                 title=result.get("test_name"),
                 severity=_map_bandit_severity(result.get("issue_severity")),
                 source=schema.VulnSource.STATIC_ANALYSIS,

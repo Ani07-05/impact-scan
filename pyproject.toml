@@ -19,7 +19,8 @@ dependencies = [
     "flask (>=3.1.1,<4.0.0)",
     "bandit (>=1.8.6,<2.0.0)",
     "requests (>=2.32.0,<3.0.0)",
-    "beautifulsoup4 (>=4.12.3,<5.0.0)"
+    "beautifulsoup4 (>=4.12.3,<5.0.0)",
+    "pygments (>=2.18.0,<3.0.0)"
 ]
 
 

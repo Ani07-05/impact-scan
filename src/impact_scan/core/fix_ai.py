@@ -1,5 +1,4 @@
 import abc
-import os
 from pathlib import Path
 from typing import List, Dict, Type
 
@@ -98,63 +97,56 @@ class LocalLLMFixProvider(AIFixProvider):
     def generate_fix(self, finding: schema.Finding) -> str:
         prompt = self._PROMPT_TEMPLATE.format(**finding.model_dump())
         try:
-            response = self.llm(prompt, max_tokens=512, stop=["\n\n"], echo=False)
-            return response["choices"][0]["text"].strip()
+            output = self.llm(prompt, max_tokens=1024, stop=["\n\n"], echo=False)
+            return output["choices"][0]["text"].strip()
         except Exception as e:
-            raise AIFixError(f"Local LLM inference error: {e}") from e
+            raise AIFixError(f"Local LLM error: {e}") from e
 
 
-def get_fix_provider(config: schema.ScanConfig) -> AIFixProvider:
-    """Factory function to instantiate the correct AI fix provider."""
-    provider_map: Dict[schema.AIProvider, Type[AIFixProvider]] = {
-        schema.AIProvider.OPENAI: OpenAIFixProvider,
-        schema.AIProvider.ANTHROPIC: AnthropicFixProvider,
-        schema.AIProvider.GEMINI: GeminiFixProvider,
-        schema.AIProvider.LOCAL: LocalLLMFixProvider,
-    }
-    
-    provider_class = provider_map.get(config.ai_provider)
-    if not provider_class:
-        raise ValueError(f"Unsupported AI provider: {config.ai_provider}")
+_PROVIDER_MAP: Dict[str, Type[AIFixProvider]] = {
+    "openai": OpenAIFixProvider,
+    "anthropic": AnthropicFixProvider,
+    "gemini": GeminiFixProvider,
+}
 
-    if config.ai_provider == schema.AIProvider.LOCAL:
-        model_path = Path(os.path.expanduser("~/.impact-scan/models/codellama-7b.Q4_K_M.gguf"))
-        return LocalLLMFixProvider(model_path=model_path)
-    
-    # Map provider names to API key names in config
-    key_mapping = {
-        "openai": "openai",
-        "anthropic": "anthropic", 
-        "gemini": "google"  # Gemini uses "google" key name
-    }
-    
-    key_name = key_mapping.get(config.ai_provider.value, config.ai_provider.value)
-    api_key = config.api_keys.get(key_name)
-    if not api_key:
-        raise ValueError(f"API key for '{key_name}' not found in config.")
-    
-    return provider_class(api_key=api_key)
+def get_ai_fix_provider(api_keys: schema.APIKeys, local_model: Path = None) -> AIFixProvider:
+    """
+    Factory function to get the first available AI fix provider.
+    """
+    if local_model:
+        try:
+            return LocalLLMFixProvider(local_model)
+        except FileNotFoundError as e:
+            raise AIFixError(str(e)) from e
 
 
-def process_findings_for_fixes(
-    findings: List[schema.Finding], config: schema.ScanConfig
-) -> None:
-    """Iterates through findings and populates 'fix_suggestion' in place."""
+    for provider_name, api_key in api_keys.model_dump().items():
+        if api_key:
+            provider_class = _PROVIDER_MAP.get(provider_name)
+            if provider_class:
+                return provider_class(api_key)
+
+    raise AIFixError("No AI provider API key found or local model specified.")
+
+
+def generate_fixes(findings: List[schema.Finding], config: schema.ScanConfig) -> None:
+    """
+    Generates AI-powered fix suggestions for a list of findings.
+    """
     if not config.enable_ai_fixes:
         return
 
     try:
-        provider = get_fix_provider(config)
-    except (ValueError, FileNotFoundError) as e:
-        print(f"Warning: Could not initialize AI provider. Skipping fixes. Reason: {e}")
+        local_llm_path = getattr(config, "local_llm_path", None)
+        fix_provider = get_ai_fix_provider(config.api_keys, local_llm_path)
+    except AIFixError as e:
+        print(f"Error initializing AI fix provider: {e}")
         return
 
+    print("🤖 Generating AI-powered fixes...")
     for finding in findings:
-        if finding.source == schema.VulnSource.DEPENDENCY:
-            continue # AI fixes are for code, not dependencies
         try:
-            fix_suggestion = provider.generate_fix(finding)
-            finding.fix_suggestion = fix_suggestion
+            fix_diff = fix_provider.generate_fix(finding)
+            finding.ai_fix = fix_diff
         except AIFixError as e:
-            print(f"Warning: Could not generate fix for {finding.vuln_id}: {e}")
-
+            print(f"Could not generate fix for {finding.vuln_id}: {e}")

@@ -22,6 +22,7 @@ class Finding(BaseModel):
     file_path: Path
     line_number: int
     vuln_id: str = Field(..., description="CVE ID or rule identifier")
+    rule_id: str
     title: str
     severity: Severity
     source: VulnSource
@@ -29,6 +30,9 @@ class Finding(BaseModel):
     description: str
     fix_suggestion: Optional[str] = None
     web_fix: Optional[str] = None
+    ai_fix: Optional[str] = None
+    ai_explanation: Optional[str] = None
+    citations: Optional[List[str]] = None
     citation: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
     
@@ -52,16 +56,28 @@ class AIProvider(str, Enum):
     LOCAL = "local"
 
 
+class APIKeys(BaseModel):
+    """API keys for AI providers."""
+    openai: Optional[str] = None
+    anthropic: Optional[str] = None
+    gemini: Optional[str] = None
+    stackoverflow: Optional[str] = None
+
+
 class ScanConfig(BaseModel):
-    target_path: Path
+    root_path: Path
     min_severity: Severity = Severity.MEDIUM
     enable_ai_fixes: bool = False
     enable_web_search: bool = False
     ai_provider: Optional[AIProvider] = None
-    api_keys: Dict[str, str] = Field(default_factory=dict)
+    api_keys: APIKeys = Field(default_factory=APIKeys)
+    web_search_limit: int = 100
+    web_search_batch_size: int = 10
+    web_search_delay: float = 2.0
+    prioritize_high_severity: bool = True
 
-    @validator('target_path')
-    def validate_target_path(cls, v):
+    @validator('root_path')
+    def validate_root_path(cls, v):
         if not v.exists():
             raise ValueError(f'Target path does not exist: {v}')
         return v
@@ -77,7 +93,7 @@ class ScanConfig(BaseModel):
 class ScanResult(BaseModel):
     config: ScanConfig
     findings: List[Finding]
-    entry_points: List[Path]
+    entry_points: List['EntryPoint']
     scanned_files: int
     scan_duration: float
     timestamp: float = Field(default_factory=time.time)
@@ -108,3 +124,6 @@ class EntryPoint(BaseModel):
         if not 0.0 <= v <= 1.0:
             raise ValueError('Confidence must be between 0.0 and 1.0')
         return v
+
+# Update model forward references
+ScanResult.model_rebuild()

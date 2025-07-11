@@ -3,6 +3,7 @@ import json
 import subprocess
 from pathlib import Path
 from typing import List, Iterator
+import sys
 
 from impact_scan.utils import schema
 
@@ -52,26 +53,69 @@ def _run_osv_scanner(file_path: Path) -> str:
 
 
 def _parse_osv_output(json_output: str, source_file: Path) -> Iterator[schema.Finding]:
-    """Parses the JSON output from osv-scanner into Finding objects."""
+    """
+    Parses the JSON output from osv-scanner, grouping vulnerabilities by package.
+    """
     try:
         data = json.loads(json_output)
+        if not data.get("results"):
+            return
+
+        # Group vulnerabilities by the package they affect
+        grouped_vulns = {}
         for result in data.get("results", []):
             for pkg_info in result.get("packages", []):
-                for vuln in pkg_info.get("vulnerabilities", []):
-                    yield schema.Finding(
-                        file_path=source_file,
-                        line_number=1,  # Dependency vulns don't have a specific line
-                        vuln_id=vuln.get("id", "UNKNOWN_OSV_ID"),
-                        title=f"Vulnerable Dependency: {pkg_info['package']['name']}@{pkg_info['package']['version']}",
-                        severity=_map_osv_severity(vuln.get("severity", [])),
-                        source=schema.VulnSource.DEPENDENCY,
-                        code_snippet=f"{pkg_info['package']['name']}=={pkg_info['package']['version']}",
-                        description=vuln.get("summary", "No summary available."),
-                        metadata={"aliases": vuln.get("aliases", [])}
-                    )
+                package = pkg_info.get("package", {})
+                pkg_id = (package.get("name"), package.get("version"))
+                if pkg_id not in grouped_vulns:
+                    grouped_vulns[pkg_id] = {
+                        "package": package,
+                        "vulns": [],
+                    }
+                grouped_vulns[pkg_id]["vulns"].extend(pkg_info.get("vulnerabilities", []))
+
+        # Create a single finding for each package
+        for (name, version), data in grouped_vulns.items():
+            if data["vulns"]:
+                yield _create_finding_from_grouped_vulns(data["package"], data["vulns"], source_file)
+
     except json.JSONDecodeError:
-        print(f"Warning: osv-scanner output was not valid JSON.")
+        print("Warning: osv-scanner output was not valid JSON.")
         return
+
+
+def _create_finding_from_grouped_vulns(
+    package: dict, vulns: List[dict], source_file: Path
+) -> schema.Finding:
+    """Creates a single Finding object from a list of grouped vulnerabilities."""
+    # Combine summaries and get the highest severity
+    all_summaries = [v.get("summary", "No summary available.") for v in vulns]
+    description = "\n".join(f"- {s}" for s in all_summaries)
+    
+    highest_severity = schema.Severity.LOW
+    all_aliases = []
+    all_ids = []
+
+    for v in vulns:
+        severity = _map_osv_severity(v.get("severity", []))
+        if severity.value > highest_severity.value:
+            highest_severity = severity
+        all_aliases.extend(v.get("aliases", []))
+        all_ids.append(v.get("id", "UNKNOWN_OSV_ID"))
+
+    # Create a single, comprehensive finding
+    return schema.Finding(
+        file_path=source_file,
+        line_number=1,
+        vuln_id=", ".join(all_ids),
+        rule_id=", ".join(all_ids),
+        title=f"Vulnerable Dependency: {package.get('name')}@{package.get('version')}",
+        severity=highest_severity,
+        source=schema.VulnSource.DEPENDENCY,
+        code_snippet=f"{package.get('name')}=={package.get('version')}",
+        description=description,
+        metadata={"aliases": all_aliases},
+    )
 
 
 def _map_osv_severity(severities: List[dict]) -> schema.Severity:
@@ -118,20 +162,25 @@ class PythonPoetryAuditor(DependencyAuditor):
 
         requirements_path = root_path / ".impact-scan.poetry-reqs.txt"
         try:
+            # This command generates a requirements.txt from poetry.lock
+            # We use sys.executable to ensure we're using the poetry from the correct venv
             subprocess.run(
-                [
-                    "poetry", "export", "-f", "requirements.txt",
-                    "--output", str(requirements_path), "--without-hashes"
-                ],
-                check=True, capture_output=True, text=True, cwd=root_path
+                [sys.executable, "-m", "poetry", "export", "-f", "requirements.txt", "--output", str(requirements_path), "--without-hashes"],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=root_path
             )
+
+            # Now run osv-scanner on the generated file
             json_output = _run_osv_scanner(requirements_path)
             if json_output:
                 yield from _parse_osv_output(json_output, lock_file)
 
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            print(f"Warning: Poetry export or osv-scanner failed for poetry.lock. Error: {e}")
+            print(f"Warning: 'poetry export' failed for {lock_file}. Is poetry installed and in your PATH? Error: {e}")
         finally:
+            # Clean up the temporary requirements file
             if requirements_path.exists():
                 requirements_path.unlink()
 
@@ -207,3 +256,13 @@ def audit_dependencies(root_path: Path) -> List[schema.Finding]:
     for auditor in auditors:
         all_findings.extend(auditor.audit(root_path))
     return all_findings
+
+
+def run_scan(scan_config: schema.ScanConfig) -> List[schema.Finding]:
+    """
+    Runs the dependency audit scan.
+    """
+    print("Starting dependency audit scan...")
+    findings = audit_dependencies(scan_config.root_path)
+    print(f"Found {len(findings)} dependency issues.")
+    return findings

@@ -6,7 +6,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.syntax import Syntax
-from rich.text import Text
 from sarif_om import SarifLog, Tool, ToolComponent, ReportingDescriptor, Run, Result
 
 from impact_scan.utils import schema
@@ -19,58 +18,140 @@ SEVERITY_COLORS = {
     schema.Severity.LOW: "cyan",
 }
 
+SEVERITY_LEVELS = {
+    schema.Severity.LOW: 0,
+    schema.Severity.MEDIUM: 1,
+    schema.Severity.HIGH: 2,
+    schema.Severity.CRITICAL: 3,
+}
 
-def display_results_in_terminal(result: schema.ScanResult, console: Console) -> None:
+
+def print_findings(result: schema.ScanResult, min_severity: schema.Severity) -> None:
     """
-    Renders the scan results to the terminal using rich tables and panels.
+    Renders the scan results to the terminal using rich tables and panels with enhanced formatting.
     """
-    console.print("\n" + "="*80)
-    console.print(f"[bold green]Scan Summary for {result.config.target_path}[/bold green]")
-    console.print("="*80)
+    console = Console()
+    console.print("\n" + "="*100)
+    console.print(f"[bold green]🛡️  Impact Scan Results for {result.config.root_path}[/bold green]")
+    console.print("="*100)
 
     summary_table = Table.grid(expand=True)
-    summary_table.add_column(style="cyan")
+    summary_table.add_column(style="cyan", min_width=20)
     summary_table.add_column(justify="right", style="bold magenta")
-    summary_table.add_row("Total Findings:", str(result.total_findings))
-    summary_table.add_row("Scanned Files:", str(result.scanned_files))
-    summary_table.add_row("Scan Duration:", f"{result.scan_duration:.2f} seconds")
+    summary_table.add_row("📊 Total Findings:", str(result.total_findings))
+    summary_table.add_row("📁 Scanned Files:", str(result.scanned_files))
+    summary_table.add_row("⏱️  Scan Duration:", f"{result.scan_duration:.2f} seconds")
+    if result.config.enable_ai_fixes:
+        ai_fixes_count = sum(1 for f in result.findings if f.fix_suggestion)
+        summary_table.add_row("🤖 AI Fixes Generated:", str(ai_fixes_count))
+    if result.config.enable_web_search:
+        web_fixes_count = sum(1 for f in result.findings if f.web_fix)
+        summary_table.add_row("🌐 Web Fixes Found:", str(web_fixes_count))
     console.print(summary_table)
 
-    if not result.findings:
-        console.print("\n[bold green]✔ No vulnerabilities found.[/bold green]")
+    # Filter findings by min_severity
+    min_level = SEVERITY_LEVELS[min_severity]
+    filtered_findings = [f for f in result.findings if SEVERITY_LEVELS[f.severity] >= min_level]
+
+    if not filtered_findings:
+        console.print("\n[bold green]✅ No vulnerabilities found matching the criteria![/bold green]")
         return
 
-    severity_order = {s: i for i, s in enumerate(SEVERITY_COLORS.keys())}
-    sorted_findings = sorted(result.findings, key=lambda f: severity_order[f.severity])
+    sorted_findings = sorted(filtered_findings, key=lambda f: SEVERITY_LEVELS[f.severity], reverse=True)
 
-    for finding in sorted_findings:
+    console.print(f"\n[bold blue]📋 Detailed Findings ([/bold blue][bold red]{len(sorted_findings)}[/bold red][bold blue] vulnerabilities)[/bold blue]\n")
+
+    for i, finding in enumerate(sorted_findings, 1):
         color = SEVERITY_COLORS.get(finding.severity, "white")
-        header = f"[{color}]{finding.severity.value.upper()}: {finding.title} ({finding.vuln_id})[/{color}]"
         
-        content_table = Table.grid(expand=True)
-        content_table.add_column()
-        content_table.add_column()
-        content_table.add_row("[bold]File[/bold]:", f"[cyan]{finding.file_path}:{finding.line_number}[/cyan]")
-        content_table.add_row("[bold]Source[/bold]:", Text(finding.source.value, style="magenta"))
+        # Enhanced header with better formatting
+        severity_icon = "🔴" if finding.severity.value == "CRITICAL" else "🟡" if finding.severity.value == "HIGH" else "🟠" if finding.severity.value == "MEDIUM" else "🔵"
+        header = f"{severity_icon} [{color}]{finding.severity.value.upper()}[/{color}] | {finding.title} | [dim]{finding.vuln_id}[/dim]"
         
-        panel = Panel(content_table, title=header, border_style=color, title_align="left")
+        # Create detailed info table
+        info_table = Table.grid(expand=True)
+        info_table.add_column(style="bold", min_width=12)
+        info_table.add_column(style="white")
+        
+        # File path with proper highlighting
+        file_path_text = f"[cyan]{finding.file_path}[/cyan]:[yellow]{finding.line_number}[/yellow]"
+        info_table.add_row("📁 File:", file_path_text)
+        info_table.add_row("🔍 Source:", f"[magenta]{finding.source.value}[/magenta]")
+        
+        # Add web fix metadata if available
+        if hasattr(finding, 'metadata') and finding.metadata:
+            if finding.metadata.get('gemini_powered'):
+                info_table.add_row("🤖 AI Analysis:", "[green]✅ Enhanced with Gemini AI[/green]")
+            if finding.metadata.get('cached_result'):
+                info_table.add_row("💾 Cache:", "[blue]✅ Cached result[/blue]")
+        
+        panel = Panel(
+            info_table, 
+            title=f"[bold white]Finding #{i}[/bold white] {header}",
+            border_style=color, 
+            title_align="left",
+            padding=(0, 1)
+        )
         console.print(panel)
 
-        console.print("[bold]Code Snippet:[/bold]")
-        console.print(Syntax(finding.code_snippet, "python", theme="monokai", line_numbers=True, start_line=finding.line_number))
+        # Enhanced code display with better syntax highlighting
+        console.print(f"\n[bold white]📝 Vulnerable Code ([/bold white][cyan]{finding.file_path}[/cyan][bold white]:[/bold white][yellow]{finding.line_number}[/yellow][bold white]):[/bold white]")
+        
+        # Determine language for syntax highlighting
+        file_ext = str(finding.file_path).split('.')[-1].lower() if '.' in str(finding.file_path) else ''
+        language_map = {
+            'py': 'python',
+            'js': 'javascript', 
+            'java': 'java',
+            'php': 'php',
+            'cpp': 'cpp',
+            'c': 'c',
+            'html': 'html',
+            'css': 'css'
+        }
+        syntax_lang = language_map.get(file_ext, 'python')
+        
+        console.print(Syntax(
+            finding.code_snippet, 
+            syntax_lang, 
+            theme="monokai", 
+            line_numbers=True, 
+            start_line=max(1, finding.line_number - 2),
+            background_color="default"
+        ))
 
+        # Enhanced AI fix display
         if finding.fix_suggestion:
-            console.print("[bold]AI Suggested Fix (diff):[/bold]")
+            console.print("\n[bold green]🤖 AI-Powered Security Fix:[/bold green]")
             console.print(Syntax(finding.fix_suggestion, "diff", theme="monokai"))
 
+        # Enhanced web fix display
         if finding.web_fix:
-            console.print("[bold]Web Fix Suggestion:[/bold]")
-            console.print(f"[cyan]{finding.web_fix}[/cyan]")
+            console.print("\n[bold blue]🌐 Web-Based Fix Recommendation:[/bold blue]")
+            
+            # Check if we have structured web fix data
+            if hasattr(finding, 'metadata') and finding.metadata and finding.metadata.get('web_fix_explanation'):
+                console.print(f"[dim]{finding.metadata['web_fix_explanation']}[/dim]\n")
+                console.print("[bold]Secure Code Fix:[/bold]")
+                console.print(Syntax(finding.metadata['web_fix_code'], syntax_lang, theme="monokai"))
+            else:
+                console.print(Syntax(finding.web_fix, syntax_lang, theme="monokai"))
+            
             if finding.citation:
-                console.print(f"[bold]Citation:[/bold] {finding.citation}")
+                console.print(f"\n[bold]📚 Reference:[/bold] [link]{finding.citation}[/link]")
         
-        console.print("-" * 80)
-
+        # Add vulnerability description if available
+        if finding.description and len(finding.description) > len(finding.title):
+            console.print("\n[bold]📖 Description:[/bold]")
+            # Truncate very long descriptions and show first few lines
+            desc_lines = finding.description.split('\n')[:3]
+            for line in desc_lines:
+                if line.strip():
+                    console.print(f"[dim]{line.strip()}[/dim]")
+            if len(finding.description.split('\n')) > 3:
+                console.print("[dim]...[truncated][/dim]")
+        
+        console.print("\n" + "─" * 100 + "\n")
 
 
 def export_to_sarif(result: schema.ScanResult, output_path: Path) -> None:
@@ -122,6 +203,47 @@ def export_to_sarif(result: schema.ScanResult, output_path: Path) -> None:
 
     try:
         with output_path.open("w", encoding="utf-8") as f:
-            json.dump(sarif_log.to_dict(), f, indent=2)
+            # Convert SarifLog to JSON properly using sarif_om's to_dict method
+            if hasattr(sarif_log, 'to_dict'):
+                sarif_dict = sarif_log.to_dict()
+            else:
+                # Fallback: manually create dictionary structure
+                sarif_dict = {
+                    "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+                    "version": sarif_log.version,
+                    "runs": []
+                }
+                for run in sarif_log.runs:
+                    run_dict = {
+                        "tool": {
+                            "driver": {
+                                "name": run.tool.driver.name,
+                                "version": run.tool.driver.semantic_version,
+                                "rules": [
+                                    {
+                                        "id": rule.id,
+                                        "name": rule.name,
+                                        "shortDescription": rule.short_description,
+                                        "fullDescription": rule.full_description,
+                                        "defaultConfiguration": rule.default_configuration
+                                    } for rule in run.tool.driver.rules
+                                ] if run.tool.driver.rules else []
+                            }
+                        },
+                        "results": []
+                    }
+                    for result in run.results:
+                        result_dict = {
+                            "ruleId": result.rule_id,
+                            "message": result.message,
+                            "locations": result.locations,
+                            "level": "warning"
+                        }
+                        if hasattr(result, 'fixes') and result.fixes:
+                            result_dict["fixes"] = result.fixes
+                        run_dict["results"].append(result_dict)
+                    sarif_dict["runs"].append(run_dict)
+            
+            json.dump(sarif_dict, f, indent=2)
     except IOError as e:
         print(f"Error: Failed to write SARIF file to {output_path}. Reason: {e}")

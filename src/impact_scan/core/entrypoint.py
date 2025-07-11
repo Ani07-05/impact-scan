@@ -1,9 +1,11 @@
 import abc
 import re
+import time
 from pathlib import Path
 from typing import List, Iterator
 
 from impact_scan.utils import paths, schema
+from . import dep_audit, static_scan
 
 
 class EntryPointDetector(abc.ABC):
@@ -78,6 +80,60 @@ class NextJSDetector(EntryPointDetector):
                     framework="Next.js",
                     confidence=1.0,
                 )
+
+
+def run_scan(config: schema.ScanConfig) -> schema.ScanResult:
+    """
+    Orchestrates the entire scanning process.
+
+    This function initializes and runs all the different scanning modules,
+    aggregates their findings, and returns a comprehensive scan result.
+    """
+    start_time = time.time()
+
+    # 1. Find entry points
+    entry_points = find_entry_points(config.root_path)
+
+    # 2. Run scanners
+    all_findings = []
+    static_findings = static_scan.run_scan(config)
+    dep_findings = dep_audit.run_scan(config)
+
+    all_findings.extend(static_findings)
+    all_findings.extend(dep_findings)
+
+    # 3. Filter findings by minimum severity
+    if config.min_severity:
+        severity_levels = {
+            schema.Severity.LOW: 0,
+            schema.Severity.MEDIUM: 1,
+            schema.Severity.HIGH: 2,
+            schema.Severity.CRITICAL: 3,
+        }
+        min_level = severity_levels.get(config.min_severity, 0)
+        
+        filtered_findings = [
+            f for f in all_findings
+            if severity_levels.get(f.severity, -1) >= min_level
+        ]
+        all_findings = filtered_findings
+
+    # 4. Get total number of scanned files (simple version)
+    scanned_files_count = len(set(f.file_path for f in all_findings))
+
+    scan_duration = time.time() - start_time
+
+    # 5. Assemble final result
+    result = schema.ScanResult(
+        config=config,
+        findings=all_findings,
+        entry_points=entry_points,
+        scanned_files=scanned_files_count,
+        scan_duration=scan_duration,
+        timestamp=start_time,
+    )
+
+    return result
 
 
 def find_entry_points(root_path: Path) -> List[schema.EntryPoint]:
