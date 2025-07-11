@@ -2,6 +2,9 @@
 
 **A comprehensive, AI-powered security vulnerability scanner for codebases with intelligent fix suggestions and professional reporting.**
 
+
+https://github.com/user-attachments/assets/15121d99-8eeb-47fd-b96e-6f4779328adc
+
 ## Overview
 
 Impact Scan is a unified security analysis tool that combines static code analysis, dependency vulnerability scanning, and AI-powered fix generation to provide comprehensive security assessments for software projects. The tool generates professional HTML reports with dark-themed interfaces and highlighted security recommendations.
