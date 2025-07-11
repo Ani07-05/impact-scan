@@ -133,16 +133,7 @@ impact-scan scan ./my-python-project \
   --html security-report.html
 ```
 
-### Example 3: CI/CD Integration
-This command is optimized for CI/CD pipelines:
-- Scans the current directory.
-- Reports only `HIGH` severity vulnerabilities.
-- Generates a SARIF report for integration with security dashboards.
-```bash
-impact-scan scan . \
-  --min-severity HIGH \
-  --sarif security-results.sarif
-```
+
 
 ## Report Features
 
@@ -236,34 +227,6 @@ poetry run pytest
 - Transitive dependency vulnerabilities
 - Outdated package versions with security issues
 - License compliance issues
-
-## Troubleshooting
-
-### Common Issues
-
-**Configuration Error: AI provider not specified**
-```
-Error: AI provider must be specified for AI fixes.
-```
-**Solution**: Specify an AI provider when enabling AI fixes:
-```bash
-impact-scan scan . --ai-fixes --ai-provider openai
-```
-
-**Permission Errors**
-```
-Permission denied: /path/to/target
-```
-**Solution**: Ensure the target directory is readable:
-```bash
-chmod -R +r /path/to/target
-```
-
-**Network Connectivity**
-```
-Failed to connect to AI provider
-```
-**Solution**: Check internet connectivity and API key validity.
 
 ### Getting Help
 - Check the command-line help: `impact-scan --help`
