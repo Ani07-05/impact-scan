@@ -233,9 +233,7 @@ poetry run pytest
 - Review example vulnerable applications in the `examples/` directory.
 - Ensure all dependencies are properly installed.
 
-## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
 
 ## Support
 
