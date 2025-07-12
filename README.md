@@ -8,6 +8,9 @@
 > ```bash
 > poetry run impact-scan scan /path/to/your/app --min-severity MEDIUM --ai-fixes --web-search --ai-provider gemini --gemini-key <your-api-key> --html report.html
 > ```
+
+https://github.com/user-attachments/assets/15121d99-8eeb-47fd-b96e-6f4779328adc
+
 ## Overview
 
 Impact Scan is a unified security analysis tool that combines static code analysis, dependency vulnerability scanning, and AI-powered fix generation to provide comprehensive security assessments for software projects. The tool generates professional HTML reports with dark-themed interfaces and highlighted security recommendations.
