@@ -1,10 +1,13 @@
+
+
 # Impact Scan
 
 **A comprehensive, AI-powered security vulnerability scanner for codebases with intelligent fix suggestions and professional reporting.**
 
-
-https://github.com/user-attachments/assets/15121d99-8eeb-47fd-b96e-6f4779328adc
-
+> **Note:** For the best results, use the following command:
+> ```bash
+> poetry run impact-scan scan /path/to/your/app --min-severity MEDIUM --ai-fixes --web-search --ai-provider gemini --gemini-key <your-api-key> --html report.html
+> ```
 ## Overview
 
 Impact Scan is a unified security analysis tool that combines static code analysis, dependency vulnerability scanning, and AI-powered fix generation to provide comprehensive security assessments for software projects. The tool generates professional HTML reports with dark-themed interfaces and highlighted security recommendations.
@@ -133,7 +136,16 @@ impact-scan scan ./my-python-project \
   --html security-report.html
 ```
 
-
+### Example 3: CI/CD Integration
+This command is optimized for CI/CD pipelines:
+- Scans the current directory.
+- Reports only `HIGH` severity vulnerabilities.
+- Generates a SARIF report for integration with security dashboards.
+```bash
+impact-scan scan . \
+  --min-severity HIGH \
+  --sarif security-results.sarif
+```
 
 ## Report Features
 
@@ -228,12 +240,42 @@ poetry run pytest
 - Outdated package versions with security issues
 - License compliance issues
 
+## Troubleshooting
+
+### Common Issues
+
+**Configuration Error: AI provider not specified**
+```
+Error: AI provider must be specified for AI fixes.
+```
+**Solution**: Specify an AI provider when enabling AI fixes:
+```bash
+impact-scan scan . --ai-fixes --ai-provider openai
+```
+
+**Permission Errors**
+```
+Permission denied: /path/to/target
+```
+**Solution**: Ensure the target directory is readable:
+```bash
+chmod -R +r /path/to/target
+```
+
+**Network Connectivity**
+```
+Failed to connect to AI provider
+```
+**Solution**: Check internet connectivity and API key validity.
+
 ### Getting Help
 - Check the command-line help: `impact-scan --help`
 - Review example vulnerable applications in the `examples/` directory.
 - Ensure all dependencies are properly installed.
 
+## License
 
+This project is licensed under the MIT License. See the `LICENSE` file for details.
 
 ## Support
 
