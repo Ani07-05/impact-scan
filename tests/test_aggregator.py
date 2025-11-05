@@ -9,26 +9,26 @@ from impact_scan.utils import schema
 def sample_findings():
     """Provides a set of sample Finding objects for testing."""
     finding1 = schema.Finding(
-        file_path=Path("/app/src/main.py"), line_number=10, vuln_id="CVE-2023-0001",
+        file_path=Path("/app/src/main.py"), line_number=10, vuln_id="CVE-2023-0001", rule_id="B608",
         title="SQL Injection", severity=schema.Severity.HIGH, source=schema.VulnSource.STATIC_ANALYSIS,
         code_snippet="db.execute(f'SELECT * FROM users WHERE id = {user_id}')",
         description="A SQL injection vulnerability."
     )
     finding2 = schema.Finding(
-        file_path=Path("/app/package.json"), line_number=1, vuln_id="CVE-2023-0002",
+        file_path=Path("/app/package.json"), line_number=1, vuln_id="CVE-2023-0002", rule_id="DEP-001",
         title="Outdated Dependency", severity=schema.Severity.MEDIUM, source=schema.VulnSource.DEPENDENCY,
         code_snippet="\"library\": \"1.0.0\"", description="An outdated library."
     )
     # This is a duplicate of finding1
     finding3 = schema.Finding(
-        file_path=Path("/app/src/main.py"), line_number=10, vuln_id="CVE-2023-0001",
+        file_path=Path("/app/src/main.py"), line_number=10, vuln_id="CVE-2023-0001", rule_id="B608",
         title="SQLi", severity=schema.Severity.HIGH, source=schema.VulnSource.STATIC_ANALYSIS,
         code_snippet="db.execute(f'SELECT * FROM users WHERE id = {user_id}')",
         description="A duplicate finding."
     )
     # This is different from finding1 only by line number
     finding4 = schema.Finding(
-        file_path=Path("/app/src/main.py"), line_number=25, vuln_id="CVE-2023-0001",
+        file_path=Path("/app/src/main.py"), line_number=25, vuln_id="CVE-2023-0001", rule_id="B608",
         title="Another SQL Injection", severity=schema.Severity.HIGH, source=schema.VulnSource.STATIC_ANALYSIS,
         code_snippet="db.execute(f'SELECT * FROM products WHERE id = {product_id}')",
         description="A different instance of the same CVE."
@@ -86,7 +86,7 @@ def test_merge_and_dedupe_with_empty_lists():
     assert not aggregator.merge_and_dedupe([], [])
     
     finding = schema.Finding(
-        file_path=Path("a.py"), line_number=1, vuln_id="V001", title="T",
+        file_path=Path("a.py"), line_number=1, vuln_id="V001", rule_id="T001", title="T",
         severity=schema.Severity.LOW, source=schema.VulnSource.STATIC_ANALYSIS,
         code_snippet="c", description="d"
     )

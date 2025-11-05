@@ -1,13 +1,16 @@
 import abc
+import logging
 from pathlib import Path
 from typing import List, Dict, Type
 
 import openai
 import anthropic
 import google.generativeai as genai
-from llama_cpp import Llama
 
 from impact_scan.utils import schema
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
 class AIFixError(Exception):
@@ -84,23 +87,27 @@ class GeminiFixProvider(AIFixProvider):
         try:
             response = self.model.generate_content(prompt)
             return response.text.strip()
+        except RuntimeError as e:
+            if "no current event loop" in str(e).lower() or "asyncio" in str(e).lower():
+                # Handle asyncio issues by creating a new event loop
+                import asyncio
+                try:
+                    # Try to get current loop, create one if none exists
+                    asyncio.get_event_loop()
+                except RuntimeError:
+                    # Create and set a new event loop for this thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                # Retry the API call
+                response = self.model.generate_content(prompt)
+                return response.text.strip()
+            else:
+                raise AIFixError(f"Gemini API error: {e}") from e
         except Exception as e:
             raise AIFixError(f"Gemini API error: {e}") from e
 
 
-class LocalLLMFixProvider(AIFixProvider):
-    def __init__(self, model_path: Path):
-        if not model_path.is_file():
-            raise FileNotFoundError(f"Local LLM model not found: {model_path}")
-        self.llm = Llama(model_path=str(model_path), verbose=False)
-
-    def generate_fix(self, finding: schema.Finding) -> str:
-        prompt = self._PROMPT_TEMPLATE.format(**finding.model_dump())
-        try:
-            output = self.llm(prompt, max_tokens=1024, stop=["\n\n"], echo=False)
-            return output["choices"][0]["text"].strip()
-        except Exception as e:
-            raise AIFixError(f"Local LLM error: {e}") from e
 
 
 _PROVIDER_MAP: Dict[str, Type[AIFixProvider]] = {
@@ -109,24 +116,17 @@ _PROVIDER_MAP: Dict[str, Type[AIFixProvider]] = {
     "gemini": GeminiFixProvider,
 }
 
-def get_ai_fix_provider(api_keys: schema.APIKeys, local_model: Path = None) -> AIFixProvider:
+def get_ai_fix_provider(api_keys: schema.APIKeys) -> AIFixProvider:
     """
     Factory function to get the first available AI fix provider.
     """
-    if local_model:
-        try:
-            return LocalLLMFixProvider(local_model)
-        except FileNotFoundError as e:
-            raise AIFixError(str(e)) from e
-
-
     for provider_name, api_key in api_keys.model_dump().items():
         if api_key:
             provider_class = _PROVIDER_MAP.get(provider_name)
             if provider_class:
                 return provider_class(api_key)
 
-    raise AIFixError("No AI provider API key found or local model specified.")
+    raise AIFixError("No AI provider API key found.")
 
 
 def generate_fixes(findings: List[schema.Finding], config: schema.ScanConfig) -> None:
@@ -137,16 +137,16 @@ def generate_fixes(findings: List[schema.Finding], config: schema.ScanConfig) ->
         return
 
     try:
-        local_llm_path = getattr(config, "local_llm_path", None)
-        fix_provider = get_ai_fix_provider(config.api_keys, local_llm_path)
+        fix_provider = get_ai_fix_provider(config.api_keys)
     except AIFixError as e:
-        print(f"Error initializing AI fix provider: {e}")
+        logger.error(f"Error initializing AI fix provider: {e}")
         return
 
-    print("🤖 Generating AI-powered fixes...")
+    logger.info("[AI] Generating AI-powered fixes...")
     for finding in findings:
         try:
             fix_diff = fix_provider.generate_fix(finding)
             finding.ai_fix = fix_diff
+            logger.debug(f"Generated fix for {finding.vuln_id}")
         except AIFixError as e:
-            print(f"Could not generate fix for {finding.vuln_id}: {e}")
+            logger.warning(f"Could not generate fix for {finding.vuln_id}: {e}")

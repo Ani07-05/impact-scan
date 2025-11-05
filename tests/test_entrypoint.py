@@ -56,13 +56,10 @@ def test_nextjs_detector_finds_canonical_path(mocker):
     """
     Tests that the NextJSDetector correctly identifies a canonical Next.js file.
     """
-    mock_is_file = mocker.patch("pathlib.Path.is_file")
-
-    # FIX: The side_effect function receives the Path instance as `self`.
-    def side_effect(self):
+    def mock_is_file_func(self):
         return str(self) == "/project/src/app/page.tsx"
 
-    mock_is_file.side_effect = side_effect
+    mocker.patch.object(Path, "is_file", mock_is_file_func)
 
     detector = entrypoint.NextJSDetector()
     results = list(detector.detect(Path("/project")))
@@ -84,11 +81,9 @@ def test_find_entry_points_aggregates_results(mocker):
     mock_flask_detector.detect.return_value = [flask_entry]
     mock_nextjs_detector.detect.return_value = [nextjs_entry]
 
-    # FIX: The patch now correctly targets the module-level variable.
-    mocker.patch(
-        "impact_scan.core.entrypoint.DETECTORS",
-        [mock_flask_detector, mock_nextjs_detector]
-    )
+    # Mock the detector classes to return our test entries
+    mocker.patch("impact_scan.core.entrypoint.FlaskDetector", return_value=mock_flask_detector)
+    mocker.patch("impact_scan.core.entrypoint.NextJSDetector", return_value=mock_nextjs_detector)
 
     results = entrypoint.find_entry_points(Path("/any"))
 

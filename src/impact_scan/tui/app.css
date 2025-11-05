@@ -1,0 +1,114 @@
+Screen {
+    background: $surface;
+    color: $text;
+}
+
+#main-container {
+    layout: horizontal;
+    width: 100%;
+    height: 100%;
+}
+
+#sidebar {
+    width: 35;
+    height: 100%;
+    background: $surface-lighten-1;
+    border-right: solid $primary-lighten-2;
+    padding: 1;
+    overflow-y: auto;
+    transition: width 300ms;
+}
+
+#sidebar.collapsed {
+    width: 0;
+    padding: 0;
+    border: none;
+}
+
+#main-content {
+    width: 1fr;
+    height: 100%;
+    padding: 1;
+    display: block;
+}
+
+.title {
+    text-style: bold;
+    text-align: center;
+    background: $primary;
+    color: white;
+    padding: 1;
+    margin-bottom: 1;
+}
+
+.config-group {
+    margin-bottom: 1;
+    padding: 1;
+    border: round $primary-lighten-2;
+    background: $surface;
+}
+
+.config-group Label {
+    text-style: bold;
+    color: $primary;
+    margin-bottom: 1;
+}
+
+.config-item {
+    width: 100%;
+}
+
+.config-btn {
+    min-width: 8;
+    height: 3;
+    margin-left: 1;
+}
+
+#action-buttons {
+    margin-top: 1;
+    align: center middle;
+}
+
+#action-buttons Button {
+    width: 1fr;
+    margin: 0 1;
+}
+
+#stats-bar {
+    height: 3;
+    align: center middle;
+    margin-bottom: 1;
+}
+
+.stat {
+    width: 1fr;
+    height: 100%;
+    text-align: center;
+    text-style: bold;
+    padding-top: 1;
+    margin: 0 1;
+    border: round $primary;
+}
+
+.total { background: $primary; color: white; }
+.critical { background: $error; color: white; }
+.high { background: $warning; color: black; }
+.medium { background: yellow; color: black; }
+.low { background: $success; color: white; }
+
+#results-table {
+    height: 2fr;
+    margin-bottom: 1;
+    border: solid $primary-lighten-2;
+}
+
+#details-tabs {
+    height: 1fr;
+}
+
+#scan-log, #details-log {
+    height: 100%;
+    border: round $primary-lighten-2;
+    padding: 1;
+    background: $surface-darken-1;
+}

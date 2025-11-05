@@ -1,8 +1,9 @@
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Optional, Dict, Any
 from enum import Enum
 from pathlib import Path
 import time
+import re
 
 
 class Severity(str, Enum):
@@ -36,17 +37,96 @@ class Finding(BaseModel):
     citation: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
     
-    @validator('line_number')
+    @field_validator('file_path')
+    @classmethod
+    def validate_file_path(cls, v):
+        """Validate file path to prevent path traversal attacks."""
+        if not isinstance(v, Path):
+            v = Path(v)
+        
+        # Resolve path to detect any traversal attempts
+        try:
+            resolved_path = v.resolve()
+        except (OSError, RuntimeError) as e:
+            raise ValueError(f"Invalid file path: {e}")
+        
+        # Check for suspicious path components
+        path_str = str(resolved_path)
+        if '..' in path_str or path_str.startswith('~'):
+            raise ValueError("Path traversal attempts are not allowed")
+        
+        return resolved_path
+    
+    @field_validator('line_number')
+    @classmethod
     def validate_line_number(cls, v):
+        if not isinstance(v, int):
+            raise ValueError('Line number must be an integer')
         if v < 1:
             raise ValueError('Line number must be positive')
+        if v > 1000000:  # Reasonable upper limit
+            raise ValueError('Line number is unreasonably large')
         return v
     
-    @validator('vuln_id')
+    @field_validator('vuln_id')
+    @classmethod
     def validate_vuln_id(cls, v):
-        if not v.strip():
+        if not isinstance(v, str):
+            raise ValueError('Vulnerability ID must be a string')
+        v = v.strip()
+        if not v:
             raise ValueError('Vulnerability ID cannot be empty')
-        return v.strip()
+        if len(v) > 200:  # Reasonable limit
+            raise ValueError('Vulnerability ID is too long')
+        # Allow alphanumeric, hyphens, underscores, dots, commas, and spaces for multi-ID strings
+        if not re.match(r'^[a-zA-Z0-9._,\s-]+$', v):
+            raise ValueError('Vulnerability ID contains invalid characters')
+        return v
+    
+    @field_validator('rule_id')
+    @classmethod
+    def validate_rule_id(cls, v):
+        if not isinstance(v, str):
+            raise ValueError('Rule ID must be a string')
+        v = v.strip()
+        if not v:
+            raise ValueError('Rule ID cannot be empty')
+        if len(v) > 200:  # Reasonable limit
+            raise ValueError('Rule ID is too long')
+        return v
+    
+    @field_validator('title')
+    @classmethod
+    def validate_title(cls, v):
+        if not isinstance(v, str):
+            raise ValueError('Title must be a string')
+        v = v.strip()
+        if not v:
+            raise ValueError('Title cannot be empty')
+        if len(v) > 500:  # Reasonable limit
+            raise ValueError('Title is too long')
+        return v
+    
+    @field_validator('code_snippet')
+    @classmethod
+    def validate_code_snippet(cls, v):
+        if not isinstance(v, str):
+            raise ValueError('Code snippet must be a string')
+        if len(v) > 10000:  # Reasonable limit for code snippets
+            raise ValueError('Code snippet is too long')
+        return v
+    
+    @field_validator('description')
+    @classmethod
+    def validate_description(cls, v):
+        if not isinstance(v, str):
+            raise ValueError('Description must be a string')
+        v = v.strip()
+        if not v:
+            raise ValueError('Description cannot be empty')
+        if len(v) > 5000:  # Reasonable limit
+            raise ValueError('Description is too long')
+        return v
 
 
 class AIProvider(str, Enum):
@@ -63,6 +143,48 @@ class APIKeys(BaseModel):
     gemini: Optional[str] = None
     stackoverflow: Optional[str] = None
 
+    def __init__(self, **data):
+        """Initialize with environment variable auto-detection."""
+        import os
+
+        # Auto-detect from environment if not explicitly provided
+        if 'openai' not in data and not data.get('openai'):
+            data['openai'] = os.getenv('OPENAI_API_KEY')
+        if 'anthropic' not in data and not data.get('anthropic'):
+            data['anthropic'] = os.getenv('ANTHROPIC_API_KEY')
+        if 'gemini' not in data and not data.get('gemini'):
+            data['gemini'] = os.getenv('GOOGLE_API_KEY')
+        if 'stackoverflow' not in data and not data.get('stackoverflow'):
+            data['stackoverflow'] = os.getenv('STACKOVERFLOW_API_KEY')
+
+        super().__init__(**data)
+    
+    @field_validator('openai', 'anthropic', 'gemini', 'stackoverflow')
+    @classmethod
+    def validate_api_keys(cls, v):
+        """Validate API keys format and prevent injection."""
+        if v is None:
+            return v
+        
+        if not isinstance(v, str):
+            raise ValueError('API key must be a string')
+        
+        v = v.strip()
+        if not v:
+            return None  # Empty string becomes None
+        
+        # Basic format validation
+        if len(v) < 10:
+            raise ValueError('API key is too short to be valid')
+        if len(v) > 500:
+            raise ValueError('API key is too long')
+        
+        # Check for suspicious characters
+        if any(char in v for char in ['\n', '\r', '\t', ';', '|', '&']):
+            raise ValueError('API key contains invalid characters')
+        
+        return v
+
 
 class ScanConfig(BaseModel):
     root_path: Path
@@ -76,18 +198,71 @@ class ScanConfig(BaseModel):
     web_search_delay: float = 2.0
     prioritize_high_severity: bool = True
 
-    @validator('root_path')
+    @field_validator('root_path')
+    @classmethod
     def validate_root_path(cls, v):
+        """Validate root path and prevent directory traversal."""
+        if not isinstance(v, Path):
+            v = Path(v)
+        
+        # Resolve to detect traversal attempts
+        try:
+            v = v.resolve()
+        except (OSError, RuntimeError) as e:
+            raise ValueError(f'Invalid root path: {e}')
+        
+        # Check path exists
         if not v.exists():
             raise ValueError(f'Target path does not exist: {v}')
+        
+        # Must be a directory
+        if not v.is_dir():
+            raise ValueError(f'Target path must be a directory: {v}')
+        
+        # Check for reasonable path length
+        if len(str(v)) > 1000:
+            raise ValueError('Root path is too long')
+        
+        return v
+    
+    @field_validator('web_search_limit')
+    @classmethod
+    def validate_web_search_limit(cls, v):
+        if not isinstance(v, int):
+            raise ValueError('Web search limit must be an integer')
+        if v < 0:
+            raise ValueError('Web search limit cannot be negative')
+        if v > 10000:
+            raise ValueError('Web search limit is too high (max 10000)')
+        return v
+    
+    @field_validator('web_search_batch_size')
+    @classmethod
+    def validate_web_search_batch_size(cls, v):
+        if not isinstance(v, int):
+            raise ValueError('Web search batch size must be an integer')
+        if v < 1:
+            raise ValueError('Web search batch size must be at least 1')
+        if v > 1000:
+            raise ValueError('Web search batch size is too high (max 1000)')
+        return v
+    
+    @field_validator('web_search_delay')
+    @classmethod
+    def validate_web_search_delay(cls, v):
+        if not isinstance(v, (int, float)):
+            raise ValueError('Web search delay must be a number')
+        if v < 0:
+            raise ValueError('Web search delay cannot be negative')
+        if v > 3600:  # 1 hour max
+            raise ValueError('Web search delay is too high (max 3600 seconds)')
         return v
 
-    @validator('ai_provider', always=True)
-    def check_ai_config(cls, v, values):
-        enable_ai_fixes = values.get('enable_ai_fixes', False)
-        if enable_ai_fixes and not v:
+    @model_validator(mode='after')
+    def check_ai_config(self):
+        if self.enable_ai_fixes and not self.ai_provider:
             raise ValueError("AI fixes enabled, but no 'ai_provider' was specified.")
-        return v
+        return self
 
 
 class ScanResult(BaseModel):
@@ -119,7 +294,8 @@ class EntryPoint(BaseModel):
     framework: str
     confidence: float = Field(..., ge=0.0, le=1.0)
     
-    @validator('confidence')
+    @field_validator('confidence')
+    @classmethod
     def validate_confidence(cls, v):
         if not 0.0 <= v <= 1.0:
             raise ValueError('Confidence must be between 0.0 and 1.0')

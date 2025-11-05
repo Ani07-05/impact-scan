@@ -1,0 +1,21 @@
+include README.md
+include LICENSE
+include CLAUDE.md
+include pyproject.toml
+include setup.py
+
+# Include all Python files
+recursive-include src *.py
+
+# Include example files
+recursive-include examples *.py *.txt *.yml *.yaml
+
+# Include tests
+recursive-include tests *.py
+
+# Exclude unwanted files
+global-exclude *.pyc
+global-exclude __pycache__
+global-exclude .DS_Store
+global-exclude *.log
+global-exclude .git*

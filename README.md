@@ -37,23 +37,28 @@ Impact Scan is a unified security analysis tool that combines static code analys
 
 ## Installation
 
-### Prerequisites
-- Python 3.13 or higher
-- Poetry (recommended) or pip for dependency management
-
-### Using Poetry (Recommended)
+### Quick Install (Recommended)
 ```bash
-git clone https://github.com/Ani07-05/impact-scan.git
-cd impact-scan
-poetry install
-poetry shell
+pip install impact-scan
 ```
 
-### Using pip
+### Install with Optional Features
+```bash
+# With local LLM support
+pip install impact-scan[local-llm]
+
+# With development tools
+pip install impact-scan[dev]
+
+# Everything
+pip install impact-scan[all]
+```
+
+### Development Installation
 ```bash
 git clone https://github.com/Ani07-05/impact-scan.git
 cd impact-scan
-pip install -e .
+pip install -e .[dev]
 ```
 
 ## Configuration
@@ -77,44 +82,74 @@ export STACKOVERFLOW_API_KEY="your-stackoverflow-api-key"
 
 Alternatively, provide keys directly via command-line options.
 
-## Usage
+## Quick Start
 
 ### Basic Security Scan
 ```bash
+# Scan current directory with standard profile
+impact-scan scan
+
+# Scan specific project
 impact-scan scan /path/to/your/project
 ```
 
-### Advanced Scanning with AI Features
+### Using Scan Profiles
 ```bash
-impact-scan scan /path/to/your/project \
-  --min-severity HIGH \
-  --ai-fixes \
-  --ai-provider openai \
-  --web-search \
-  --html report.html \
-  --sarif results.sarif
+# Quick scan (high/critical only)
+impact-scan scan --profile quick
+
+# Standard scan (with AI fixes)  
+impact-scan scan --profile standard
+
+# Comprehensive scan (with AI + web search)
+impact-scan scan --profile comprehensive
+
+# CI/CD optimized scan
+impact-scan scan --profile ci
 ```
 
-### Command-Line Options
+### Generate Reports
+```bash
+# HTML report
+impact-scan scan --output report.html
 
-#### Required Arguments
-- `root_path`: Path to the codebase directory to scan.
+# SARIF report for security tools
+impact-scan scan --output results.sarif
 
-#### Optional Parameters
-- `--min-severity, -s`: Minimum severity level to report (LOW, MEDIUM, HIGH, CRITICAL). Default: `MEDIUM`.
-- `--ai-fixes`: Enable AI-powered fix suggestions.
-- `--ai-provider`: Choose AI provider (openai, anthropic, gemini).
-- `--web-search`: Enable web-based fix recommendations.
-- `--web-limit`: Maximum number of web searches to perform. Default: `100`.
-- `--web-batch-size`: Batch size for web searches. Default: `10`.
-- `--web-delay`: Delay in seconds between web search requests. Default: `2.0`.
-- `--prioritize-high`: Prioritize high/critical severity findings for web search. Default: `True`.
-- `--html`: Output path for HTML report.
-- `--sarif`: Output path for SARIF results.
-- `--openai-key`: OpenAI API key (or use `OPENAI_API_KEY` environment variable).
-- `--anthropic-key`: Anthropic API key (or use `ANTHROPIC_API_KEY` environment variable).
-- `--gemini-key`: Google API key (or use `GOOGLE_API_KEY` environment variable).
-- `--stackoverflow-key`: Stack Overflow API key (or use `STACKOVERFLOW_API_KEY` environment variable).
+# Both
+impact-scan scan --profile comprehensive --output security-report.html
+```
+
+### AI-Powered Analysis
+```bash
+# Use specific AI provider
+impact-scan scan --ai gemini
+impact-scan scan --ai openai
+impact-scan scan --ai anthropic
+
+# AI fixes are enabled automatically based on your API keys
+```
+
+### Configuration File
+```bash
+# Generate configuration file
+impact-scan init
+
+# Use custom config
+impact-scan scan --config my-config.yml
+
+# Configuration is auto-detected from:
+# .impact-scan.yml, pyproject.toml, etc.
+```
+
+### Check Your Setup
+```bash
+# List available scan profiles
+impact-scan profiles
+
+# Check API key configuration
+impact-scan config
+```
 
 ## Examples
 

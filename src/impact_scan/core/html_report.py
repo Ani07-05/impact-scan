@@ -8,7 +8,12 @@ support for all scanner results, AI fixes, and citations.
 from datetime import datetime
 from pathlib import Path
 from html import escape
-import markdown
+
+try:
+    import markdown
+    HAS_MARKDOWN = True
+except ImportError:
+    HAS_MARKDOWN = False
 
 from pygments import highlight
 from pygments.lexers import get_lexer_by_name, DiffLexer
@@ -126,7 +131,13 @@ class SecurityReportGenerator:
         fix_suggestion_lang = "diff" if fix_suggestion and fix_suggestion.strip().startswith("--- a/") else "python"
         highlighted_fix = self._highlight_code(fix_suggestion, fix_suggestion_lang) if fix_suggestion else ""
 
-        ai_explanation_html = markdown.markdown(finding.ai_explanation) if finding.ai_explanation else ""
+        if finding.ai_explanation:
+            if HAS_MARKDOWN:
+                ai_explanation_html = markdown.markdown(finding.ai_explanation)
+            else:
+                ai_explanation_html = escape(finding.ai_explanation).replace('\n', '<br>')
+        else:
+            ai_explanation_html = ""
         
         citations_html = ""
         if finding.citations:

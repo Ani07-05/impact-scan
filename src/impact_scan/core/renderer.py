@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 from typing import List
 
@@ -9,6 +10,9 @@ from rich.syntax import Syntax
 from sarif_om import SarifLog, Tool, ToolComponent, ReportingDescriptor, Run, Result
 
 from impact_scan.utils import schema
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 # Define colors for different severity levels for terminal
 SEVERITY_COLORS = {
@@ -32,21 +36,21 @@ def print_findings(result: schema.ScanResult, min_severity: schema.Severity) -> 
     """
     console = Console()
     console.print("\n" + "="*100)
-    console.print(f"[bold green]🛡️  Impact Scan Results for {result.config.root_path}[/bold green]")
+    console.print(f"[bold green][SECURITY] Impact Scan Results for {result.config.root_path}[/bold green]")
     console.print("="*100)
 
     summary_table = Table.grid(expand=True)
     summary_table.add_column(style="cyan", min_width=20)
     summary_table.add_column(justify="right", style="bold magenta")
-    summary_table.add_row("📊 Total Findings:", str(result.total_findings))
-    summary_table.add_row("📁 Scanned Files:", str(result.scanned_files))
-    summary_table.add_row("⏱️  Scan Duration:", f"{result.scan_duration:.2f} seconds")
+    summary_table.add_row("[STATS] Total Findings:", str(result.total_findings))
+    summary_table.add_row("[FILES] Scanned Files:", str(result.scanned_files))
+    summary_table.add_row("[TIME] Scan Duration:", f"{result.scan_duration:.2f} seconds")
     if result.config.enable_ai_fixes:
         ai_fixes_count = sum(1 for f in result.findings if f.fix_suggestion)
-        summary_table.add_row("🤖 AI Fixes Generated:", str(ai_fixes_count))
+        summary_table.add_row("[AI] AI Fixes Generated:", str(ai_fixes_count))
     if result.config.enable_web_search:
         web_fixes_count = sum(1 for f in result.findings if f.web_fix)
-        summary_table.add_row("🌐 Web Fixes Found:", str(web_fixes_count))
+        summary_table.add_row("[WEB] Web Fixes Found:", str(web_fixes_count))
     console.print(summary_table)
 
     # Filter findings by min_severity
@@ -54,18 +58,18 @@ def print_findings(result: schema.ScanResult, min_severity: schema.Severity) -> 
     filtered_findings = [f for f in result.findings if SEVERITY_LEVELS[f.severity] >= min_level]
 
     if not filtered_findings:
-        console.print("\n[bold green]✅ No vulnerabilities found matching the criteria![/bold green]")
+        console.print("\n[bold green][SUCCESS] No vulnerabilities found matching the criteria![/bold green]")
         return
 
     sorted_findings = sorted(filtered_findings, key=lambda f: SEVERITY_LEVELS[f.severity], reverse=True)
 
-    console.print(f"\n[bold blue]📋 Detailed Findings ([/bold blue][bold red]{len(sorted_findings)}[/bold red][bold blue] vulnerabilities)[/bold blue]\n")
+    console.print(f"\n[bold blue][DETAILS] Detailed Findings ([/bold blue][bold red]{len(sorted_findings)}[/bold red][bold blue] vulnerabilities)[/bold blue]\n")
 
     for i, finding in enumerate(sorted_findings, 1):
         color = SEVERITY_COLORS.get(finding.severity, "white")
         
         # Enhanced header with better formatting
-        severity_icon = "🔴" if finding.severity.value == "CRITICAL" else "🟡" if finding.severity.value == "HIGH" else "🟠" if finding.severity.value == "MEDIUM" else "🔵"
+        severity_icon = "[red]●[/red]" if finding.severity.value == "CRITICAL" else "[yellow]●[/yellow]" if finding.severity.value == "HIGH" else "[orange1]●[/orange1]" if finding.severity.value == "MEDIUM" else "[blue]●[/blue]"
         header = f"{severity_icon} [{color}]{finding.severity.value.upper()}[/{color}] | {finding.title} | [dim]{finding.vuln_id}[/dim]"
         
         # Create detailed info table
@@ -75,15 +79,15 @@ def print_findings(result: schema.ScanResult, min_severity: schema.Severity) -> 
         
         # File path with proper highlighting
         file_path_text = f"[cyan]{finding.file_path}[/cyan]:[yellow]{finding.line_number}[/yellow]"
-        info_table.add_row("📁 File:", file_path_text)
-        info_table.add_row("🔍 Source:", f"[magenta]{finding.source.value}[/magenta]")
+        info_table.add_row("[FILE] File:", file_path_text)
+        info_table.add_row("[SOURCE] Source:", f"[magenta]{finding.source.value}[/magenta]")
         
         # Add web fix metadata if available
         if hasattr(finding, 'metadata') and finding.metadata:
             if finding.metadata.get('gemini_powered'):
-                info_table.add_row("🤖 AI Analysis:", "[green]✅ Enhanced with Gemini AI[/green]")
+                info_table.add_row("[AI] AI Analysis:", "[green][SUCCESS] Enhanced with Gemini AI[/green]")
             if finding.metadata.get('cached_result'):
-                info_table.add_row("💾 Cache:", "[blue]✅ Cached result[/blue]")
+                info_table.add_row("[CACHE] Cache:", "[blue][SUCCESS] Cached result[/blue]")
         
         panel = Panel(
             info_table, 
@@ -95,7 +99,7 @@ def print_findings(result: schema.ScanResult, min_severity: schema.Severity) -> 
         console.print(panel)
 
         # Enhanced code display with better syntax highlighting
-        console.print(f"\n[bold white]📝 Vulnerable Code ([/bold white][cyan]{finding.file_path}[/cyan][bold white]:[/bold white][yellow]{finding.line_number}[/yellow][bold white]):[/bold white]")
+        console.print(f"\n[bold white][CODE] Vulnerable Code ([/bold white][cyan]{finding.file_path}[/cyan][bold white]:[/bold white][yellow]{finding.line_number}[/yellow][bold white]):[/bold white]")
         
         # Determine language for syntax highlighting
         file_ext = str(finding.file_path).split('.')[-1].lower() if '.' in str(finding.file_path) else ''
@@ -122,12 +126,12 @@ def print_findings(result: schema.ScanResult, min_severity: schema.Severity) -> 
 
         # Enhanced AI fix display
         if finding.fix_suggestion:
-            console.print("\n[bold green]🤖 AI-Powered Security Fix:[/bold green]")
+            console.print("\n[bold green][AI] AI-Powered Security Fix:[/bold green]")
             console.print(Syntax(finding.fix_suggestion, "diff", theme="monokai"))
 
         # Enhanced web fix display
         if finding.web_fix:
-            console.print("\n[bold blue]🌐 Web-Based Fix Recommendation:[/bold blue]")
+            console.print("\n[bold blue][WEB] Web-Based Fix Recommendation:[/bold blue]")
             
             # Check if we have structured web fix data
             if hasattr(finding, 'metadata') and finding.metadata and finding.metadata.get('web_fix_explanation'):
@@ -138,11 +142,11 @@ def print_findings(result: schema.ScanResult, min_severity: schema.Severity) -> 
                 console.print(Syntax(finding.web_fix, syntax_lang, theme="monokai"))
             
             if finding.citation:
-                console.print(f"\n[bold]📚 Reference:[/bold] [link]{finding.citation}[/link]")
+                console.print(f"\n[bold][REFERENCE] Reference:[/bold] [link]{finding.citation}[/link]")
         
         # Add vulnerability description if available
         if finding.description and len(finding.description) > len(finding.title):
-            console.print("\n[bold]📖 Description:[/bold]")
+            console.print("\n[bold][DESCRIPTION] Description:[/bold]")
             # Truncate very long descriptions and show first few lines
             desc_lines = finding.description.split('\n')[:3]
             for line in desc_lines:
@@ -246,4 +250,4 @@ def export_to_sarif(result: schema.ScanResult, output_path: Path) -> None:
             
             json.dump(sarif_dict, f, indent=2)
     except IOError as e:
-        print(f"Error: Failed to write SARIF file to {output_path}. Reason: {e}")
+        logger.error(f"Failed to write SARIF file to {output_path}. Reason: {e}")
