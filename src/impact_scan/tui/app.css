@@ -64,6 +64,16 @@ Screen {
     margin-left: 1;
 }
 
+.switch-container {
+    height: 3;
+    align: left middle;
+}
+
+.switch-label {
+    margin-left: 2;
+    content-align: left middle;
+}
+
 #action-buttons {
     margin-top: 1;
     align: center middle;

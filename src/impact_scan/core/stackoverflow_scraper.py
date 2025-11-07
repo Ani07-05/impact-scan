@@ -427,11 +427,22 @@ class StackOverflowScraper:
         desc_lower = finding.description.lower() if finding.description else ""
         combined = f"{title_lower} {desc_lower}"
 
-        # Extract key vulnerability type
-        if 'sql injection' in combined or 'sqli' in combined:
+        # Extract key vulnerability type - Framework-specific first
+        if 'flask' in combined and 'debug' in combined:
+            vuln_type = 'Flask production deployment disable debug'
+        elif 'django' in combined and 'debug' in combined:
+            vuln_type = 'Django production settings debug false'
+        elif ('flask' in combined or language == 'python') and 'secret' in combined and 'key' in combined:
+            vuln_type = 'Flask secret key environment variable'
+        elif 'flask' in combined and 'hardcoded' in combined:
+            vuln_type = 'Flask configuration environment variables'
+        # Generic vulnerabilities
+        elif 'sql injection' in combined or 'sqli' in combined:
             vuln_type = 'sql injection prevention'
         elif 'xss' in combined or 'cross-site scripting' in combined:
             vuln_type = 'xss prevention'
+        elif 'hardcoded' in combined and ('secret' in combined or 'key' in combined):
+            vuln_type = f'{language} secret key environment variable'
         elif 'hardcoded' in combined:
             vuln_type = 'hardcoded credentials fix'
         elif 'path traversal' in combined:
@@ -446,7 +457,7 @@ class StackOverflowScraper:
             vuln_type = ' '.join(words)
 
         # Build query
-        query = f"site:stackoverflow.com {vuln_type} {language} secure fix"
+        query = f"site:stackoverflow.com {vuln_type} {language} secure"
         return query
 
     async def _search_google_for_stackoverflow(self, browser: Browser, query: str) -> List[str]:

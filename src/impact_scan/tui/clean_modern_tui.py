@@ -21,7 +21,7 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button, DataTable, DirectoryTree, Footer, Header, Input, Label,
-    LoadingIndicator, Log, ProgressBar, Select, Static
+    LoadingIndicator, Log, ProgressBar, Select, Static, Switch
 )
 
 from impact_scan.utils import schema, profiles
@@ -368,6 +368,16 @@ class CleanModernTUI(App):
         width: 8;
     }
 
+    #stackoverflow-switch {
+        width: auto;
+    }
+
+    .switch-label {
+        margin-left: 2;
+        content-align: left middle;
+        color: $text-muted;
+    }
+
     #start-scan-btn {
         width: 1fr;
         height: 3;
@@ -542,6 +552,11 @@ class CleanModernTUI(App):
                         )
                         yield Button("Keys", variant="default", id="keys-btn")
 
+                    with Horizontal(classes="input-row"):
+                        yield Label("Stack Overflow", classes="input-label")
+                        yield Switch(value=True, id="stackoverflow-switch")
+                        yield Static("Enable SO citations", classes="switch-label")
+
                     yield Button("Start Scan", variant="success", id="start-scan-btn")
 
                 # Progress section
@@ -675,6 +690,14 @@ class CleanModernTUI(App):
                 profile.ai_provider = None
             elif ai_prov != "auto":
                 profile.ai_provider = ai_prov
+
+            # Get Stack Overflow setting from switch
+            so_switch = self.query_one("#stackoverflow-switch", Switch)
+            profile.enable_stackoverflow_scraper = so_switch.value
+            if so_switch.value:
+                self.log_msg("SO citations enabled")
+            else:
+                self.log_msg("SO citations disabled")
 
             config = profiles.create_config_from_profile(
                 root_path=target,

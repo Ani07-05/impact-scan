@@ -222,12 +222,17 @@ class ImpactScanTUI(App):
                 with Vertical(classes="config-group"):
                     yield Label("AI Provider")
                     yield Select(
-                        [("Auto", "auto"), ("OpenAI", "openai"), ("Anthropic", "anthropic"), 
+                        [("Auto", "auto"), ("OpenAI", "openai"), ("Anthropic", "anthropic"),
                          ("Gemini", "gemini"), ("None", "none")],
                         value="auto",
                         id="ai-select",
                         classes="config-item",
                     )
+                with Vertical(classes="config-group"):
+                    yield Label("Stack Overflow Citations")
+                    with Horizontal(classes="switch-container"):
+                        yield Switch(value=True, id="stackoverflow-switch")
+                        yield Static("Enable SO fixes", classes="switch-label")
                 with Horizontal(id="action-buttons"):
                     yield Button("Scan", variant="success", id="start-scan")
                     yield Button("API Keys", id="api-keys-btn")
@@ -337,14 +342,18 @@ class ImpactScanTUI(App):
         try:
             profile_name = self.query_one("#profile-select", Select).value
             profile = profiles.get_profile(profile_name)
-            
+
             ai_provider = self.query_one("#ai-select", Select).value
             if ai_provider == "none":
                 profile.enable_ai_fixes = False
                 profile.ai_provider = None
             elif ai_provider != "auto":
                 profile.ai_provider = ai_provider
-            
+
+            # Get Stack Overflow setting from switch
+            enable_stackoverflow = self.query_one("#stackoverflow-switch", Switch).value
+            profile.enable_stackoverflow_scraper = enable_stackoverflow
+
             config = profiles.create_config_from_profile(
                 root_path=scan_path,
                 profile=profile,
@@ -353,7 +362,11 @@ class ImpactScanTUI(App):
             
             self.current_config = config
             self.log_message(f"Starting scan on '{scan_path}' with '{profile_name}' profile...")
-            
+            if enable_stackoverflow:
+                self.log_message("[cyan]Stack Overflow citations enabled[/cyan]")
+            else:
+                self.log_message("[dim]Stack Overflow citations disabled[/dim]")
+
             # Clear previous results
             self.query_one("#results-table", DataTable).clear()
             self.query_one("#details-log", RichLog).clear()

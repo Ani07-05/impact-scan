@@ -159,12 +159,24 @@ class StackOverflowAPI:
         desc_lower = finding.description.lower() if finding.description else ""
         combined = f"{title_lower} {desc_lower}"
 
-        if 'sql injection' in combined or 'sqli' in combined:
+        # Framework-specific vulnerabilities
+        if 'flask' in combined and 'debug' in combined:
+            vuln_keywords = 'Flask production deployment disable debug'
+        elif 'django' in combined and 'debug' in combined:
+            vuln_keywords = 'Django production settings debug false'
+        elif ('flask' in combined or language == 'python') and 'secret' in combined and 'key' in combined:
+            vuln_keywords = 'Flask secret key environment variable'
+        elif 'flask' in combined and 'hardcoded' in combined:
+            vuln_keywords = 'Flask configuration environment variables'
+        # Generic security vulnerabilities
+        elif 'sql injection' in combined or 'sqli' in combined:
             vuln_keywords = f'sql injection {language} prevent'
         elif 'xss' in combined or 'cross-site scripting' in combined:
             vuln_keywords = f'xss {language} prevent'
         elif 'hardcoded' in combined and 'password' in combined:
             vuln_keywords = f'password storage {language} secure'
+        elif 'hardcoded' in combined and ('secret' in combined or 'key' in combined):
+            vuln_keywords = f'{language} secret key environment variable'
         elif 'hardcoded' in combined:
             vuln_keywords = f'credentials storage {language} secure'
         elif 'path traversal' in combined:
@@ -881,12 +893,73 @@ Keep your response concise (under 200 words).
         return []
 
 
+def _filter_relevant_so_answers(finding: Finding, so_answers: List) -> List:
+    """
+    Filter Stack Overflow answers for relevance to the vulnerability.
+
+    Args:
+        finding: The vulnerability finding
+        so_answers: List of Stack Overflow answer objects
+
+    Returns:
+        Filtered list of relevant answers
+    """
+    if not so_answers:
+        return []
+
+    # Extract vulnerability keywords
+    title_lower = finding.title.lower()
+    desc_lower = finding.description.lower() if finding.description else ""
+    vuln_id_lower = finding.vuln_id.lower() if finding.vuln_id else ""
+
+    # Build relevance keywords from vulnerability
+    relevance_keywords = set()
+
+    # Framework/language keywords
+    if 'flask' in title_lower or 'flask' in desc_lower:
+        relevance_keywords.update(['flask', 'python', 'werkzeug'])
+    if 'django' in title_lower or 'django' in desc_lower:
+        relevance_keywords.update(['django', 'python'])
+    if 'sql' in title_lower or 'sql' in desc_lower:
+        relevance_keywords.update(['sql', 'injection', 'database', 'query', 'parameterized'])
+    if 'debug' in title_lower or 'debug' in desc_lower:
+        relevance_keywords.update(['debug', 'production', 'deployment', 'configuration'])
+    if 'secret' in title_lower or 'secret' in desc_lower or 'hardcoded' in title_lower or 'hardcoded' in desc_lower:
+        relevance_keywords.update(['secret', 'key', 'environment', 'variable', 'config', 'credential', 'password'])
+    if 'xss' in title_lower or 'xss' in desc_lower:
+        relevance_keywords.update(['xss', 'sanitize', 'escape', 'html'])
+
+    # Irrelevant keywords to exclude
+    exclude_keywords = ['gmail', 'google cloud', 'docker', 'kubernetes', 'cloud run', 'm1 mac', 'ios', 'android']
+
+    relevant_answers = []
+
+    for answer in so_answers:
+        answer_title = answer.title.lower() if hasattr(answer, 'title') else ''
+        answer_explanation = answer.explanation.lower() if hasattr(answer, 'explanation') else ''
+        answer_text = f"{answer_title} {answer_explanation}"
+
+        # Check if answer contains excluded keywords
+        has_excluded = any(excluded in answer_text for excluded in exclude_keywords)
+        if has_excluded:
+            continue
+
+        # Check if answer contains relevance keywords
+        matches = sum(1 for keyword in relevance_keywords if keyword in answer_text)
+
+        # Require at least 2 keyword matches for relevance
+        if matches >= 2:
+            relevant_answers.append(answer)
+
+    return relevant_answers
+
+
 def search_for_vulnerability_fix(finding: Finding, config: ScanConfig):
     """
     Searches for a fix for a given vulnerability using a hybrid approach.
     It prioritizes a Gemini-based AI search for a tailored fix and explanation,
     then enhances it with the best available web and Stack Overflow citations.
-    
+
     Args:
         finding: The vulnerability finding to search for.
         config: Scan configuration.
@@ -953,19 +1026,31 @@ def search_for_vulnerability_fix(finding: Finding, config: ScanConfig):
     if so_answers:
         console.log(f"[green][SO_FOUND] Found {len(so_answers)} Stack Overflow answers[/green]")
 
+        # Filter for relevance before processing
+        relevant_answers = _filter_relevant_so_answers(finding, so_answers)
+
+        if not relevant_answers:
+            console.log(f"[yellow][SO_FILTER] All {len(so_answers)} Stack Overflow answers filtered as irrelevant[/yellow]")
+            so_answers = []
+        else:
+            console.log(f"[green][SO_FILTER] {len(relevant_answers)}/{len(so_answers)} Stack Overflow answers passed relevance check[/green]")
+            so_answers = relevant_answers
+
         # Try to analyze with Gemini AI (optional)
         analyzed_fixes = []
-        if config.api_keys.gemini:
+        if so_answers and config.api_keys.gemini:
             analyzed_fixes = analyze_stackoverflow_with_gemini(finding, so_answers, config)
 
         # If Gemini analysis succeeded, use those results
         if analyzed_fixes:
             so_data_to_use = analyzed_fixes
             console.log(f"[green][SO_GEMINI] Using {len(analyzed_fixes)} Gemini-analyzed Stack Overflow answers[/green]")
-        else:
+        elif so_answers:
             # Fallback: Include SO answers without Gemini analysis
             console.log(f"[yellow][SO_FALLBACK] Including Stack Overflow answers without AI analysis[/yellow]")
             so_data_to_use = [answer.to_dict() for answer in so_answers]
+        else:
+            so_data_to_use = []
 
         # Convert to StackOverflowFix objects and attach to finding
         from ..utils.schema import StackOverflowFix, CodeBlock

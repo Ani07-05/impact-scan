@@ -53,6 +53,7 @@ dependencies = [
     "crawlee>=0.3.0",
     "pygments>=2.15.0",
     "pyyaml>=6.0.0",
+    "markdown>=3.5.0",
     "tomli>=2.0.0;python_version<'3.11'",
     "semgrep (>=1.134.0,<2.0.0)",
     "safety (>=3.6.1,<4.0.0)",

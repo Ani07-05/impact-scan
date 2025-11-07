@@ -131,13 +131,38 @@ class SecurityReportGenerator:
         fix_suggestion_lang = "diff" if fix_suggestion and fix_suggestion.strip().startswith("--- a/") else "python"
         highlighted_fix = self._highlight_code(fix_suggestion, fix_suggestion_lang) if fix_suggestion else ""
 
+        # Merge AI explanation with Gemini Stack Overflow analysis
+        ai_explanation_html = ""
+        combined_explanation = ""
+
+        # Add main AI explanation if exists
         if finding.ai_explanation:
+            combined_explanation = finding.ai_explanation
+        # Fallback: Use description if no AI explanation
+        elif finding.description:
+            combined_explanation = f"**Vulnerability:** {finding.description}\n\n"
+            # Add basic severity info
+            combined_explanation += f"**Severity:** {finding.severity.value.upper()}\n\n"
+            # Suggest enabling AI features
+            if not finding.ai_fix:
+                combined_explanation += "*Enable AI-powered fix generation with `--ai gemini` for detailed remediation guidance.*"
+
+        # Add Gemini SO analysis if exists
+        if finding.stackoverflow_fixes and finding.stackoverflow_fixes[0].gemini_analysis:
+            if combined_explanation:
+                combined_explanation += "\n\n---\n\n**Why the Stack Overflow Fix Works:**\n\n"
+            combined_explanation += finding.stackoverflow_fixes[0].gemini_analysis
+
+        # Convert to HTML
+        if combined_explanation:
             if HAS_MARKDOWN:
-                ai_explanation_html = markdown.markdown(finding.ai_explanation)
+                # Enable extensions for proper bold/italic rendering and code blocks
+                ai_explanation_html = markdown.markdown(
+                    combined_explanation,
+                    extensions=['extra', 'nl2br', 'sane_lists']
+                )
             else:
-                ai_explanation_html = escape(finding.ai_explanation).replace('\n', '<br>')
-        else:
-            ai_explanation_html = ""
+                ai_explanation_html = escape(combined_explanation).replace('\n', '<br>')
         
         citations_html = ""
         if finding.citations:
@@ -178,20 +203,6 @@ class SecurityReportGenerator:
                 </div>
                 """
 
-            # Gemini analysis for primary answer
-            gemini_analysis_html = ""
-            if primary_fix.gemini_analysis:
-                if HAS_MARKDOWN:
-                    analysis_md = markdown.markdown(primary_fix.gemini_analysis)
-                else:
-                    analysis_md = escape(primary_fix.gemini_analysis).replace('\n', '<br>')
-                gemini_analysis_html = f"""
-                <div class="gemini-validation">
-                    <strong><i class="fas fa-robot"></i> How This Fix Works (AI Explanation):</strong>
-                    <div class="gemini-analysis-content">{analysis_md}</div>
-                </div>
-                """
-
             # Build primary SO answer card
             accepted_badge = '<span class="so-accepted"><i class="fas fa-check-circle"></i> Accepted</span>' if primary_fix.accepted else ''
             primary_card_html = f"""
@@ -222,7 +233,6 @@ class SecurityReportGenerator:
                         <p>{escape(primary_fix.explanation)}</p>
                     </div>
                     {code_blocks_html}
-                    {gemini_analysis_html}
                     {comments_html}
                 </div>
             </div>
@@ -283,12 +293,12 @@ class SecurityReportGenerator:
                     </div>
                 </div>
 
-                <h4><i class="fas fa-lightbulb"></i> AI-Powered Explanation</h4>
+                <h4><i class="fas fa-lightbulb"></i> Vulnerability Explanation & Fix Analysis</h4>
                 <div class="ai-explanation">
                     {ai_explanation_html}
                 </div>
-                {citations_html}
                 {stackoverflow_html}
+                {citations_html}
             </div>
             <div class="card-footer">
                 <strong>Rule ID:</strong> {escape(finding.rule_id)} | <strong>Source:</strong> {escape(finding.source.value)}
@@ -795,8 +805,18 @@ class SecurityReportGenerator:
 </html>
         """
 
-def save_report(result: schema.ScanResult, output_path: Path):
-    """Generates and saves the HTML report."""
+def save_report(result: schema.ScanResult, output_path):
+    """Generates and saves the HTML report.
+
+    Args:
+        result: The scan result to generate a report from
+        output_path: Path or string where the report should be saved
+    """
     generator = SecurityReportGenerator()
     html_content = generator.generate_html(result)
+
+    # Convert to Path object if string is provided
+    if isinstance(output_path, str):
+        output_path = Path(output_path)
+
     output_path.write_text(html_content, encoding="utf-8")
