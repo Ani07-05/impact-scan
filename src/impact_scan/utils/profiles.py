@@ -19,6 +19,10 @@ class ScanProfile:
     web_search_batch_size: int
     web_search_delay: float
     prioritize_high_severity: bool
+    enable_stackoverflow_scraper: bool = True
+    stackoverflow_max_answers: int = 3
+    stackoverflow_scrape_delay: float = 4.0
+    stackoverflow_include_comments: bool = True
 
 
 # Predefined scan profiles
@@ -34,10 +38,14 @@ SCAN_PROFILES = {
         web_search_batch_size=5,
         web_search_delay=1.0,
         prioritize_high_severity=True,
+        enable_stackoverflow_scraper=False,
+        stackoverflow_max_answers=0,
+        stackoverflow_scrape_delay=4.0,
+        stackoverflow_include_comments=False,
     ),
     
     "standard": ScanProfile(
-        name="standard", 
+        name="standard",
         description="Balanced scan with moderate depth and AI assistance",
         min_severity=schema.Severity.MEDIUM,
         enable_ai_fixes=True,
@@ -47,6 +55,10 @@ SCAN_PROFILES = {
         web_search_batch_size=10,
         web_search_delay=2.0,
         prioritize_high_severity=True,
+        enable_stackoverflow_scraper=False,  # API is now primary, scraper only as fallback
+        stackoverflow_max_answers=3,
+        stackoverflow_scrape_delay=4.0,
+        stackoverflow_include_comments=True,
     ),
     
     "comprehensive": ScanProfile(
@@ -60,6 +72,10 @@ SCAN_PROFILES = {
         web_search_batch_size=20,
         web_search_delay=1.5,
         prioritize_high_severity=True,
+        enable_stackoverflow_scraper=False,  # API is now primary, scraper only as fallback
+        stackoverflow_max_answers=5,
+        stackoverflow_scrape_delay=3.5,
+        stackoverflow_include_comments=True,
     ),
     
     "ci": ScanProfile(
@@ -73,6 +89,10 @@ SCAN_PROFILES = {
         web_search_batch_size=5,
         web_search_delay=1.0,
         prioritize_high_severity=True,
+        enable_stackoverflow_scraper=False,
+        stackoverflow_max_answers=0,
+        stackoverflow_scrape_delay=4.0,
+        stackoverflow_include_comments=False,
     ),
 }
 
@@ -128,6 +148,10 @@ def create_config_from_profile(
         "web_search_batch_size": profile.web_search_batch_size,
         "web_search_delay": profile.web_search_delay,
         "prioritize_high_severity": profile.prioritize_high_severity,
+        "enable_stackoverflow_scraper": profile.enable_stackoverflow_scraper,
+        "stackoverflow_max_answers": profile.stackoverflow_max_answers,
+        "stackoverflow_scrape_delay": profile.stackoverflow_scrape_delay,
+        "stackoverflow_include_comments": profile.stackoverflow_include_comments,
     }
     
     # Apply any overrides

@@ -149,6 +149,120 @@ class SecurityReportGenerator:
             </div>
             """
 
+        # Stack Overflow Fixes Section
+        stackoverflow_html = ""
+        if finding.stackoverflow_fixes:
+            # Get the top-voted answer (first in sorted list)
+            primary_fix = finding.stackoverflow_fixes[0]
+
+            # Build PRIMARY answer card (full details)
+            # Generate code blocks HTML for primary answer
+            code_blocks_html = ""
+            for code_block in primary_fix.code_snippets:
+                highlighted_so_code = self._highlight_code(code_block.code, code_block.language)
+                code_blocks_html += f"""
+                <div class="so-code-block">
+                    <div class="code-lang-tag">{escape(code_block.language)}</div>
+                    {highlighted_so_code}
+                </div>
+                """
+
+            # Generate comments HTML for primary answer
+            comments_html = ""
+            if primary_fix.comments:
+                comments_list = "".join(f'<li>{escape(comment)}</li>' for comment in primary_fix.comments[:3])
+                comments_html = f"""
+                <div class="so-comments">
+                    <strong><i class="fas fa-comments"></i> Key Comments:</strong>
+                    <ul>{comments_list}</ul>
+                </div>
+                """
+
+            # Gemini analysis for primary answer
+            gemini_analysis_html = ""
+            if primary_fix.gemini_analysis:
+                if HAS_MARKDOWN:
+                    analysis_md = markdown.markdown(primary_fix.gemini_analysis)
+                else:
+                    analysis_md = escape(primary_fix.gemini_analysis).replace('\n', '<br>')
+                gemini_analysis_html = f"""
+                <div class="gemini-validation">
+                    <strong><i class="fas fa-robot"></i> How This Fix Works (AI Explanation):</strong>
+                    <div class="gemini-analysis-content">{analysis_md}</div>
+                </div>
+                """
+
+            # Build primary SO answer card
+            accepted_badge = '<span class="so-accepted"><i class="fas fa-check-circle"></i> Accepted</span>' if primary_fix.accepted else ''
+            primary_card_html = f"""
+            <div class="so-answer-card so-primary-answer">
+                <div class="so-header">
+                    <div class="so-title-row">
+                        <a href="{escape(primary_fix.url)}" target="_blank" class="so-link">
+                            <i class="fab fa-stack-overflow"></i> {escape(primary_fix.title)}
+                        </a>
+                    </div>
+                    <div class="so-meta-row">
+                        <span class="so-votes" title="Stack Overflow Votes">
+                            <i class="fas fa-arrow-up"></i> {primary_fix.votes}
+                        </span>
+                        {accepted_badge}
+                        <span class="so-author">
+                            <i class="fas fa-user"></i> {escape(primary_fix.author)}
+                            <span class="so-reputation">({primary_fix.author_reputation:,} rep)</span>
+                        </span>
+                        <span class="so-date">
+                            <i class="fas fa-calendar"></i> {escape(primary_fix.post_date)}
+                        </span>
+                    </div>
+                </div>
+                <div class="so-body">
+                    <div class="so-explanation">
+                        <strong>Answer Explanation:</strong>
+                        <p>{escape(primary_fix.explanation)}</p>
+                    </div>
+                    {code_blocks_html}
+                    {gemini_analysis_html}
+                    {comments_html}
+                </div>
+            </div>
+            """
+
+            # Build ADDITIONAL references (compact citation links)
+            additional_refs_html = ""
+            if len(finding.stackoverflow_fixes) > 1:
+                additional_links = []
+                for so_fix in finding.stackoverflow_fixes[1:]:
+                    accepted_icon = '<i class="fas fa-check-circle" style="color: #5fa134;"></i>' if so_fix.accepted else ''
+                    additional_links.append(f"""
+                    <li class="so-citation-item">
+                        <a href="{escape(so_fix.url)}" target="_blank" class="so-citation-link">
+                            <i class="fab fa-stack-overflow"></i> {escape(so_fix.title)}
+                        </a>
+                        <span class="so-citation-meta">
+                            <span class="so-citation-votes">↑ {so_fix.votes}</span>
+                            {accepted_icon}
+                        </span>
+                    </li>
+                    """)
+
+                additional_refs_html = f"""
+                <div class="so-additional-references">
+                    <h5><i class="fas fa-link"></i> Additional Stack Overflow References</h5>
+                    <ul class="so-citations-list">
+                        {''.join(additional_links)}
+                    </ul>
+                </div>
+                """
+
+            stackoverflow_html = f"""
+            <div class="stackoverflow-fixes-container">
+                <h4><i class="fab fa-stack-overflow"></i> Top Stack Overflow Solution</h4>
+                {primary_card_html}
+                {additional_refs_html}
+            </div>
+            """
+
         return f"""
         <div class="finding-card" id="finding-{index}">
             <div class="card-header {finding.severity.value.lower()}">
@@ -174,6 +288,7 @@ class SecurityReportGenerator:
                     {ai_explanation_html}
                 </div>
                 {citations_html}
+                {stackoverflow_html}
             </div>
             <div class="card-footer">
                 <strong>Rule ID:</strong> {escape(finding.rule_id)} | <strong>Source:</strong> {escape(finding.source.value)}
@@ -393,6 +508,226 @@ class SecurityReportGenerator:
         .citation-link a:hover {{
             text-decoration: underline;
         }}
+
+        /* Stack Overflow Fixes Section */
+        .stackoverflow-fixes-container {{
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #0d0d0d;
+            border: 2px solid #F48024;
+            border-radius: 8px;
+        }}
+        .stackoverflow-fixes-container h4 {{
+            color: #F48024;
+            font-size: 1.3em;
+            margin-top: 0;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #F48024;
+            padding-bottom: 8px;
+        }}
+        .so-fixes-grid {{
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }}
+        .so-answer-card {{
+            background-color: #000000;
+            border: 1px solid #444;
+            border-left: 4px solid #F48024;
+            border-radius: 6px;
+            padding: 15px;
+            transition: all 0.3s ease;
+        }}
+        .so-answer-card:hover {{
+            border-left-color: #F48024;
+            box-shadow: 0 4px 12px rgba(244, 128, 36, 0.2);
+            transform: translateY(-2px);
+        }}
+        .so-header {{
+            margin-bottom: 12px;
+        }}
+        .so-title-row {{
+            margin-bottom: 8px;
+        }}
+        .so-link {{
+            color: #F48024;
+            font-size: 1.15em;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .so-link:hover {{
+            color: #ff9147;
+            text-decoration: underline;
+        }}
+        .so-meta-row {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            font-size: 0.9em;
+            color: #999;
+            align-items: center;
+        }}
+        .so-votes {{
+            color: #F48024;
+            font-weight: 600;
+            font-size: 1em;
+        }}
+        .so-accepted {{
+            color: #5eba7d;
+            font-weight: 600;
+            padding: 2px 8px;
+            background-color: rgba(94, 186, 125, 0.1);
+            border-radius: 4px;
+        }}
+        .so-author {{
+            color: #BBB;
+        }}
+        .so-reputation {{
+            color: #888;
+            font-size: 0.9em;
+        }}
+        .so-date {{
+            color: #888;
+        }}
+        .so-body {{
+            margin-top: 12px;
+        }}
+        .so-explanation {{
+            background-color: #0a0a0a;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            border-left: 3px solid #555;
+        }}
+        .so-explanation p {{
+            margin: 0;
+            color: #DDD;
+            line-height: 1.6;
+        }}
+        .so-code-block {{
+            margin: 12px 0;
+            position: relative;
+        }}
+        .code-lang-tag {{
+            background-color: #F48024;
+            color: #000;
+            padding: 3px 10px;
+            font-size: 0.75em;
+            font-weight: 600;
+            text-transform: uppercase;
+            display: inline-block;
+            border-radius: 3px 3px 0 0;
+            font-family: 'Fira Code', monospace;
+        }}
+        .gemini-validation {{
+            background-color: #0d1117;
+            border: 1px solid #30363d;
+            border-left: 3px solid #58a6ff;
+            padding: 12px;
+            margin-top: 12px;
+            border-radius: 4px;
+        }}
+        .gemini-validation strong {{
+            color: #58a6ff;
+            display: block;
+            margin-bottom: 8px;
+        }}
+        .gemini-analysis-content {{
+            color: #DDD;
+            line-height: 1.6;
+        }}
+        .so-comments {{
+            background-color: #0a0a0a;
+            padding: 10px;
+            margin-top: 12px;
+            border-radius: 4px;
+            border-left: 3px solid #666;
+        }}
+        .so-comments strong {{
+            color: #BBB;
+            display: block;
+            margin-bottom: 8px;
+        }}
+        .so-comments ul {{
+            margin: 0;
+            padding-left: 20px;
+        }}
+        .so-comments li {{
+            color: #AAA;
+            margin-bottom: 6px;
+            line-height: 1.5;
+        }}
+
+        /* Primary SO Answer - Enhanced prominence */
+        .so-primary-answer {{
+            border-left-width: 5px;
+            border-left-color: #F48024;
+            box-shadow: 0 2px 8px rgba(244, 128, 36, 0.15);
+        }}
+
+        /* Additional Stack Overflow References */
+        .so-additional-references {{
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #0a0a0a;
+            border-radius: 6px;
+            border: 1px solid #333;
+        }}
+        .so-additional-references h5 {{
+            color: #BBB;
+            font-size: 1.05em;
+            margin-top: 0;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .so-additional-references h5 i {{
+            color: #F48024;
+        }}
+        .so-citations-list {{
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }}
+        .so-citation-item {{
+            padding: 8px 0;
+            border-bottom: 1px solid #222;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .so-citation-item:last-child {{
+            border-bottom: none;
+        }}
+        .so-citation-link {{
+            color: #F48024;
+            text-decoration: none;
+            font-size: 0.95em;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            flex: 1;
+        }}
+        .so-citation-link:hover {{
+            color: #ff9147;
+            text-decoration: underline;
+        }}
+        .so-citation-meta {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.85em;
+            color: #888;
+        }}
+        .so-citation-votes {{
+            color: #F48024;
+            font-weight: 600;
+        }}
+
         .grid-container {{
             display: grid;
             grid-template-columns: 1fr 1fr;

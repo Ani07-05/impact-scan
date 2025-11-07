@@ -56,6 +56,21 @@ def scan_command(
         "--ai",
         help="AI provider: openai, anthropic, gemini",
     ),
+    min_severity: Optional[str] = typer.Option(
+        None,
+        "--min-severity",
+        help="Minimum severity: low, medium, high, critical",
+    ),
+    no_web_search: bool = typer.Option(
+        False,
+        "--no-web-search",
+        help="Disable web search and Stack Overflow scraping",
+    ),
+    no_stackoverflow: bool = typer.Option(
+        False,
+        "--no-stackoverflow",
+        help="Disable Stack Overflow scraper only",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose", "-v",
@@ -105,6 +120,13 @@ def scan_command(
             cli_overrides['output'] = output
         if ai_provider:
             cli_overrides['ai_provider'] = ai_provider
+        if min_severity:
+            cli_overrides['min_severity'] = min_severity
+        if no_web_search:
+            cli_overrides['enable_web_search'] = False
+            cli_overrides['enable_stackoverflow_scraper'] = False
+        if no_stackoverflow:
+            cli_overrides['enable_stackoverflow_scraper'] = False
         
         # Merge configurations
         merged_config = config_file.merge_config(file_config, cli_overrides)
@@ -122,11 +144,25 @@ def scan_command(
         if final_ai_provider:
             scan_profile.ai_provider = final_ai_provider
         
+        # Build overrides dict for config
+        config_overrides = {}
+
+        # Apply merged config overrides
+        if 'enable_web_search' in merged_config:
+            config_overrides['enable_web_search'] = merged_config['enable_web_search']
+        if 'enable_stackoverflow_scraper' in merged_config:
+            config_overrides['enable_stackoverflow_scraper'] = merged_config['enable_stackoverflow_scraper']
+        if 'min_severity' in merged_config:
+            # Convert string to Severity enum
+            sev_str = merged_config['min_severity'].upper()
+            config_overrides['min_severity'] = schema.Severity[sev_str]
+
         # Create config from profile
         config = profiles.create_config_from_profile(
             root_path=path,
             profile=scan_profile,
-            api_keys=api_keys
+            api_keys=api_keys,
+            overrides=config_overrides
         )
         
         # Show scan configuration
@@ -142,6 +178,13 @@ def scan_command(
         
         if config.enable_web_search:
             console.print(f"Web search: [green]Enabled[/green] (limit: {config.web_search_limit})")
+
+        if config.enable_stackoverflow_scraper:
+            console.print(f"Stack Overflow scraper: [green]Enabled[/green] (max: {config.stackoverflow_max_answers} answers)")
+        elif no_stackoverflow:
+            console.print("Stack Overflow scraper: [yellow]Disabled[/yellow] (--no-stackoverflow flag)")
+        elif no_web_search:
+            console.print("Stack Overflow scraper: [yellow]Disabled[/yellow] (--no-web-search flag)")
 
         # Core scanning
         scan_result = entrypoint.run_scan(config)

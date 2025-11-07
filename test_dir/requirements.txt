@@ -1,8 +1,0 @@
-# Test requirements.txt with some vulnerable packages for testing
-requests==2.25.1
-flask==1.0.0
-django==2.2.0
-pyyaml==3.13
-pillow==6.2.0
-urllib3==1.25.8
-jinja2==2.10.1

@@ -104,16 +104,16 @@ class StackOverflowAPI:
     def get_question_answers(self, question_id: int, site: str = "stackoverflow") -> List[Dict[str, Any]]:
         """
         Get answers for a specific question.
-        
+
         Args:
             question_id: The ID of the question
             site: The site to search (default: stackoverflow)
-            
+
         Returns:
             List of answer objects from the API
         """
         url = f"{self.BASE_URL}/questions/{question_id}/answers"
-        
+
         params = {
             "site": site,
             "order": "desc",
@@ -121,11 +121,156 @@ class StackOverflowAPI:
             "filter": "withbody",
             "pagesize": 5
         }
-        
+
         if self.api_key:
             params["key"] = self.api_key
-            
+
         return self._make_request(url, params)
+
+    def build_search_query_from_finding(self, finding: Finding) -> str:
+        """
+        Build an optimized search query for Stack Overflow API from a Finding.
+
+        Args:
+            finding: The vulnerability finding
+
+        Returns:
+            Optimized search query string
+        """
+        # Extract language from file extension
+        file_ext = str(finding.file_path).split('.')[-1].lower() if '.' in str(finding.file_path) else ''
+        language_map = {
+            'py': 'python',
+            'js': 'javascript',
+            'java': 'java',
+            'php': 'php',
+            'rb': 'ruby',
+            'go': 'go',
+            'rs': 'rust',
+            'cpp': 'c++',
+            'c': 'c',
+            'ts': 'typescript'
+        }
+        language = language_map.get(file_ext, file_ext)
+
+        # Map vulnerability types to search keywords
+        # Check both title and description for better matching
+        title_lower = finding.title.lower()
+        desc_lower = finding.description.lower() if finding.description else ""
+        combined = f"{title_lower} {desc_lower}"
+
+        if 'sql injection' in combined or 'sqli' in combined:
+            vuln_keywords = f'sql injection {language} prevent'
+        elif 'xss' in combined or 'cross-site scripting' in combined:
+            vuln_keywords = f'xss {language} prevent'
+        elif 'hardcoded' in combined and 'password' in combined:
+            vuln_keywords = f'password storage {language} secure'
+        elif 'hardcoded' in combined:
+            vuln_keywords = f'credentials storage {language} secure'
+        elif 'path traversal' in combined:
+            vuln_keywords = f'path traversal {language} prevent'
+        elif 'yaml' in combined and 'load' in combined:
+            vuln_keywords = f'yaml safe load {language}'
+        elif 'md5' in combined or 'weak hash' in combined:
+            vuln_keywords = f'password hash {language} secure'
+        elif 'ssl' in combined and 'verify' in combined:
+            vuln_keywords = f'ssl verify {language}'
+        elif 'shell' in combined or 'command injection' in combined:
+            vuln_keywords = f'command injection {language} prevent'
+        else:
+            # Use first 2-3 words from title + language
+            words = title_lower.split()[:2]
+            vuln_keywords = f"{' '.join(words)} {language}"
+
+        # Return concise query (3-5 words for better API results)
+        return vuln_keywords
+
+    def extract_code_and_text_from_body(self, html_body: str) -> tuple[List[Dict[str, str]], str]:
+        """
+        Extract code blocks and explanation text from answer HTML body.
+
+        Args:
+            html_body: HTML body from Stack Overflow API response
+
+        Returns:
+            Tuple of (code_blocks, explanation_text)
+            - code_blocks: List of dicts with 'language' and 'code' keys
+            - explanation_text: Plain text explanation with code removed
+        """
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html_body, 'html.parser')
+        code_blocks = []
+
+        # Extract code blocks with language detection
+        for pre_tag in soup.find_all('pre'):
+            code_tag = pre_tag.find('code')
+            if not code_tag:
+                continue
+
+            code_text = code_tag.get_text().strip()
+            if len(code_text) < 10:  # Skip very short snippets
+                continue
+
+            # Detect language from class attribute
+            language = 'text'
+            class_attr = code_tag.get('class', [])
+            if isinstance(class_attr, list):
+                for cls in class_attr:
+                    if cls.startswith('language-') or cls.startswith('lang-'):
+                        language = cls.split('-', 1)[1]
+                        break
+                    elif cls in ['python', 'javascript', 'java', 'php', 'ruby', 'go', 'rust', 'cpp', 'c']:
+                        language = cls
+                        break
+
+            # Heuristic language detection if not found
+            if language == 'text':
+                language = self._detect_language_heuristic(code_text)
+
+            code_blocks.append({
+                'language': language,
+                'code': code_text
+            })
+
+        # Extract explanation text (remove code blocks)
+        explanation_soup = BeautifulSoup(html_body, 'html.parser')
+        for pre in explanation_soup.find_all('pre'):
+            pre.decompose()
+
+        explanation = explanation_soup.get_text(separator=' ', strip=True)
+
+        # Limit explanation length
+        if len(explanation) > 500:
+            explanation = explanation[:500] + "..."
+
+        return code_blocks, explanation
+
+    def _detect_language_heuristic(self, code: str) -> str:
+        """Simple heuristic language detection for code snippets."""
+        code_lower = code.lower()
+
+        # Python indicators
+        if 'def ' in code or 'import ' in code or 'elif ' in code or '__init__' in code:
+            return 'python'
+
+        # JavaScript indicators
+        if 'function' in code or 'const ' in code or 'let ' in code or '=>' in code or 'var ' in code:
+            return 'javascript'
+
+        # Java indicators
+        if 'public class' in code or 'private ' in code or 'System.out' in code:
+            return 'java'
+
+        # PHP indicators
+        if '<?php' in code or '$_' in code:
+            return 'php'
+
+        # SQL indicators
+        if 'select ' in code_lower or 'insert into' in code_lower or 'update ' in code_lower:
+            return 'sql'
+
+        return 'text'
 
 def extract_code_blocks(html_content: str) -> List[str]:
     """
@@ -149,6 +294,137 @@ def extract_code_blocks(html_content: str) -> List[str]:
             code_blocks.append(code_text)
     
     return code_blocks
+
+
+def search_stackoverflow_via_api(
+    finding: Finding,
+    so_api: StackOverflowAPI,
+    max_answers: int = 3
+) -> List:
+    """
+    Search Stack Overflow using the official API instead of web scraping.
+
+    This function provides a reliable, fast alternative to Google-based scraping by
+    directly querying the Stack Exchange API.
+
+    Args:
+        finding: The vulnerability finding to search for
+        so_api: StackOverflowAPI instance
+        max_answers: Maximum number of answers to return (default: 3)
+
+    Returns:
+        List of StackOverflowAnswer objects (from stackoverflow_scraper module)
+    """
+    # Import StackOverflowAnswer from scraper module to reuse data structures
+    from .stackoverflow_scraper import StackOverflowAnswer, CodeBlock
+
+    console.log(f"[cyan][SO_API] Searching Stack Overflow API for {finding.vuln_id}...[/cyan]")
+
+    # Build optimized search query
+    query = so_api.build_search_query_from_finding(finding)
+    console.log(f"[dim]API Query: {query}[/dim]")
+
+    # Search for questions
+    questions = so_api.search_questions(query)
+
+    if not questions:
+        console.log(f"[yellow][SO_API] No questions found for {finding.vuln_id}[/yellow]")
+        return []
+
+    console.log(f"[green][SO_API] Found {len(questions)} questions[/green]")
+
+    all_answers = []
+
+    # Process each question
+    for i, question in enumerate(questions[:5], 1):  # Limit to top 5 questions
+        try:
+            question_id = question.get('question_id')
+            question_title = question.get('title', 'Unknown Question')
+            question_link = question.get('link', '')
+
+            console.log(f"[dim]  ({i}) Processing question {question_id}: {question_title[:60]}...[/dim]")
+
+            # Get answers for this question
+            answers = so_api.get_question_answers(question_id)
+
+            if not answers:
+                continue
+
+            # Process each answer
+            for answer in answers[:3]:  # Top 3 answers per question
+                try:
+                    answer_id = answer.get('answer_id')
+                    answer_body = answer.get('body', '')
+                    votes = answer.get('score', 0)
+                    is_accepted = answer.get('is_accepted', False)
+
+                    # Extract code blocks and explanation from body
+                    code_blocks_data, explanation = so_api.extract_code_and_text_from_body(answer_body)
+
+                    # Skip answers without code
+                    if not code_blocks_data:
+                        continue
+
+                    # Extract author info
+                    owner = answer.get('owner', {})
+                    author_name = owner.get('display_name', 'Unknown')
+                    author_reputation = owner.get('reputation', 0)
+
+                    # Extract creation date
+                    creation_date = answer.get('creation_date', 0)
+                    from datetime import datetime
+                    post_date = datetime.fromtimestamp(creation_date).strftime('%Y-%m-%d') if creation_date else 'Unknown'
+
+                    # Convert code blocks to CodeBlock objects
+                    code_block_objects = [
+                        CodeBlock(language=cb['language'], code=cb['code'])
+                        for cb in code_blocks_data
+                    ]
+
+                    # Calculate score: votes + (accepted bonus) + (reputation factor)
+                    score = float(votes) + (50.0 if is_accepted else 0.0) + (author_reputation / 1000.0)
+
+                    # Build answer URL
+                    answer_url = f"{question_link}#answer-{answer_id}" if '#' not in question_link else question_link
+
+                    # Create StackOverflowAnswer object
+                    so_answer = StackOverflowAnswer(
+                        url=answer_url,
+                        title=question_title,
+                        question_id=str(question_id),
+                        answer_id=str(answer_id),
+                        votes=votes,
+                        accepted=is_accepted,
+                        author=author_name,
+                        author_reputation=author_reputation,
+                        post_date=post_date,
+                        code_snippets=code_block_objects,
+                        explanation=explanation,
+                        comments=[],  # API doesn't easily provide comments, can be added later
+                        score=score
+                    )
+
+                    all_answers.append(so_answer)
+
+                except Exception as e:
+                    console.log(f"[red]Error processing answer {answer.get('answer_id')}: {e}[/red]")
+                    continue
+
+        except Exception as e:
+            console.log(f"[red]Error processing question {question.get('question_id')}: {e}[/red]")
+            continue
+
+    # Sort by score and limit to max_answers
+    all_answers.sort(key=lambda x: x.score, reverse=True)
+    top_answers = all_answers[:max_answers]
+
+    if top_answers:
+        console.log(f"[bold green][SO_API_SUCCESS] Found {len(top_answers)} Stack Overflow answers via API[/bold green]")
+    else:
+        console.log(f"[yellow][SO_API] No answers with code found for {finding.vuln_id}[/yellow]")
+
+    return top_answers
+
 
 class GeminiWebSearch:
     """
@@ -492,6 +768,119 @@ def search_with_gemini(finding: Finding, config: ScanConfig, so_api: StackOverfl
         console.log(f"[bold red]Error during Gemini search for {finding.vuln_id}:[/bold red] {e}")
         return False
 
+def analyze_stackoverflow_with_gemini(finding: Finding, so_answers: List, config: ScanConfig) -> List[Dict[str, Any]]:
+    """
+    Analyze scraped Stack Overflow answers using Gemini AI.
+
+    Args:
+        finding: The vulnerability finding
+        so_answers: List of StackOverflowAnswer objects from scraper
+        config: Scan configuration
+
+    Returns:
+        List of analyzed Stack Overflow fixes with Gemini validation
+    """
+    if not config.api_keys.gemini:
+        console.log("[yellow]No Gemini API key, skipping Stack Overflow analysis[/yellow]")
+        return []
+
+    console.log(f"[cyan][GEMINI_SO] Analyzing {len(so_answers)} Stack Overflow answers with Gemini AI...[/cyan]")
+
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=config.api_keys.gemini)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+
+        analyzed_fixes = []
+
+        for i, so_answer in enumerate(so_answers, 1):
+            try:
+                # Build analysis prompt
+                code_blocks_text = "\n\n".join([
+                    f"```{block.language}\n{block.code}\n```"
+                    for block in so_answer.code_snippets
+                ])
+
+                prompt = f"""You are a cybersecurity expert analyzing a Stack Overflow answer for security vulnerability fixes.
+
+**Vulnerability Context:**
+- ID: {finding.vuln_id}
+- Title: {finding.title}
+- Severity: {finding.severity.value}
+- File: {finding.file_path}:{finding.line_number}
+
+**Original Vulnerable Code:**
+```
+{finding.code_snippet}
+```
+
+**Stack Overflow Answer Details:**
+- URL: {so_answer.url}
+- Votes: {so_answer.votes} {"(✓ Accepted)" if so_answer.accepted else ""}
+- Author: {so_answer.author} ({so_answer.author_reputation:,} reputation)
+- Explanation: {so_answer.explanation}
+
+**Proposed Fix Code from Stack Overflow:**
+{code_blocks_text}
+
+**Your Task:**
+1. **Validate Security**: Is this Stack Overflow fix secure for the given vulnerability? Explain why or why not in 2-3 sentences.
+2. **Applicability**: Does this fix apply to the specific vulnerable code shown? Rate: HIGH/MEDIUM/LOW and explain.
+3. **Recommendations**: If needed, suggest any modifications to make the fix more secure or applicable.
+
+Keep your response concise (under 200 words).
+"""
+
+                # Rate limit
+                time.sleep(1.5)
+
+                # Generate analysis
+                response = model.generate_content(
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.2,
+                        max_output_tokens=500,
+                        top_p=0.8,
+                    )
+                )
+
+                if response.text:
+                    gemini_analysis = response.text.strip()
+                    console.log(f"[green]({i}/{len(so_answers)}) Gemini analysis complete for answer {so_answer.answer_id}[/green]")
+
+                    # Convert to dict with Gemini analysis
+                    fix_dict = {
+                        'url': so_answer.url,
+                        'title': so_answer.title,
+                        'question_id': so_answer.question_id,
+                        'answer_id': so_answer.answer_id,
+                        'votes': so_answer.votes,
+                        'accepted': so_answer.accepted,
+                        'author': so_answer.author,
+                        'author_reputation': so_answer.author_reputation,
+                        'post_date': so_answer.post_date,
+                        'code_snippets': [{'language': cb.language, 'code': cb.code} for cb in so_answer.code_snippets],
+                        'explanation': so_answer.explanation,
+                        'comments': so_answer.comments,
+                        'gemini_analysis': gemini_analysis,
+                        'score': so_answer.score
+                    }
+                    analyzed_fixes.append(fix_dict)
+                else:
+                    console.log(f"[yellow]({i}/{len(so_answers)}) Gemini returned empty response[/yellow]")
+
+            except Exception as e:
+                console.log(f"[red]Error analyzing SO answer {so_answer.answer_id}: {e}[/red]")
+                continue
+
+        console.log(f"[bold green][GEMINI_SO_SUCCESS] Analyzed {len(analyzed_fixes)} Stack Overflow fixes[/bold green]")
+        return analyzed_fixes
+
+    except Exception as e:
+        console.log(f"[bold red]Error in Gemini Stack Overflow analysis: {e}[/bold red]")
+        return []
+
+
 def search_for_vulnerability_fix(finding: Finding, config: ScanConfig):
     """
     Searches for a fix for a given vulnerability using a hybrid approach.
@@ -512,6 +901,112 @@ def search_for_vulnerability_fix(finding: Finding, config: ScanConfig):
 
     # --- Step 1: Get the primary fix and explanation from Gemini AI ---
     search_with_gemini(finding, config, so_api)
+
+    # --- Step 1.5: Enhance with Stack Overflow (API-first, scraper fallback) ---
+    so_answers = []
+
+    # Try API search first (fast, reliable)
+    if config.api_keys.gemini:
+        try:
+            console.log(f"[SO_API] Trying Stack Overflow API for [bold]{finding.vuln_id}[/bold]...")
+            so_answers = search_stackoverflow_via_api(finding, so_api, max_answers=config.stackoverflow_max_answers)
+
+            if so_answers:
+                console.log(f"[bold green][SO_API] API search successful - found {len(so_answers)} answers[/bold green]")
+        except Exception as e:
+            console.log(f"[yellow][SO_API] API search failed: {e}[/yellow]")
+            so_answers = []
+
+    # Fallback to scraper only if API returned nothing AND scraper is enabled
+    if not so_answers and config.enable_stackoverflow_scraper and config.api_keys.gemini:
+        console.log(f"[SO_SCRAPER] Falling back to web scraper for [bold]{finding.vuln_id}[/bold]...")
+
+        try:
+            # Import scraper (async)
+            from .stackoverflow_scraper import StackOverflowScraper
+            import asyncio
+
+            # Create scraper with config
+            so_scraper = StackOverflowScraper(
+                scrape_delay=config.stackoverflow_scrape_delay,
+                max_answers=config.stackoverflow_max_answers,
+                include_comments=config.stackoverflow_include_comments
+            )
+
+            # Scrape Stack Overflow (async)
+            try:
+                so_answers = asyncio.run(so_scraper.search_and_scrape(finding))
+            except RuntimeError as e:
+                # Handle "no running event loop" error
+                if "no running event loop" in str(e).lower() or "cannot be called from a running event loop" in str(e).lower():
+                    # Already in async context, use existing loop
+                    loop = asyncio.get_event_loop()
+                    so_answers = loop.run_until_complete(so_scraper.search_and_scrape(finding))
+                else:
+                    raise
+
+        except Exception as e:
+            console.log(f"[red][SO_SCRAPER] Scraper failed: {e}[/red]")
+            so_answers = []
+
+    # Process Stack Overflow answers (from API or scraper)
+    if so_answers:
+        console.log(f"[green][SO_FOUND] Found {len(so_answers)} Stack Overflow answers[/green]")
+
+        # Try to analyze with Gemini AI (optional)
+        analyzed_fixes = []
+        if config.api_keys.gemini:
+            analyzed_fixes = analyze_stackoverflow_with_gemini(finding, so_answers, config)
+
+        # If Gemini analysis succeeded, use those results
+        if analyzed_fixes:
+            so_data_to_use = analyzed_fixes
+            console.log(f"[green][SO_GEMINI] Using {len(analyzed_fixes)} Gemini-analyzed Stack Overflow answers[/green]")
+        else:
+            # Fallback: Include SO answers without Gemini analysis
+            console.log(f"[yellow][SO_FALLBACK] Including Stack Overflow answers without AI analysis[/yellow]")
+            so_data_to_use = [answer.to_dict() for answer in so_answers]
+
+        # Convert to StackOverflowFix objects and attach to finding
+        from ..utils.schema import StackOverflowFix, CodeBlock
+
+        so_fix_objects = []
+        for fix in so_data_to_use:
+            # Convert code snippets
+            code_blocks = [CodeBlock(**cb) for cb in fix['code_snippets']]
+
+            # Create StackOverflowFix object
+            so_fix = StackOverflowFix(
+                url=fix['url'],
+                title=fix['title'],
+                question_id=fix['question_id'],
+                answer_id=fix['answer_id'],
+                votes=fix['votes'],
+                accepted=fix['accepted'],
+                author=fix['author'],
+                author_reputation=fix['author_reputation'],
+                post_date=fix['post_date'],
+                code_snippets=code_blocks,
+                explanation=fix['explanation'],
+                comments=fix['comments'],
+                gemini_analysis=fix.get('gemini_analysis'),  # Will be None if no Gemini analysis
+                score=fix['score']
+            )
+            so_fix_objects.append(so_fix)
+
+        # Attach to finding
+        finding.stackoverflow_fixes = so_fix_objects
+
+        console.log(f"[bold green][SO_SUCCESS] Added {len(so_fix_objects)} Stack Overflow fixes to {finding.vuln_id}[/bold green]")
+
+        # Add SO URLs to citations
+        if not finding.citations:
+            finding.citations = []
+        for so_fix in so_fix_objects:
+            if so_fix.url not in finding.citations:
+                finding.citations.append(so_fix.url)
+    else:
+        console.log(f"[yellow][SO_WARNING] No Stack Overflow answers found for {finding.vuln_id}[/yellow]")
 
     # --- Step 2: Enhance the finding with the best possible citations ---
     console.log(f"[ENHANCE] Enhancing citations for [bold]{finding.vuln_id}[/bold]...")
@@ -725,28 +1220,34 @@ def process_findings_for_web_fixes(findings: List[Finding], config: ScanConfig):
     cached_hits = 0
     
     # Initialize global cache for deduplication across batches
-    processed_cache = set()
-    
+    processed_cache = {}  # Changed to dict to store findings
+
     for batch_start in range(0, len(limited_findings), config.web_search_batch_size):
         batch_end = min(batch_start + config.web_search_batch_size, len(limited_findings))
         batch = limited_findings[batch_start:batch_end]
         batch_num = (batch_start // config.web_search_batch_size) + 1
         total_batches = (len(limited_findings) + config.web_search_batch_size - 1) // config.web_search_batch_size
-        
+
         console.log(f"\n[bold magenta][BATCH] Batch {batch_num}/{total_batches} ({len(batch)} findings)[/bold magenta]")
-        
+
         batch_start_time = time.time()
         batch_successful = 0
         batch_cached = 0
-        
+
         for i, finding in enumerate(batch, 1):
             # Simple deduplication based on vuln_id and title
             dedup_key = f"{finding.vuln_id}_{finding.title}"
             if dedup_key in processed_cache:
-                console.log(f"[dim]({total_processed + i}) Skipping duplicate: {finding.vuln_id}[/dim]")
+                console.log(f"[dim]({total_processed + i}) Copying citations from duplicate: {finding.vuln_id}[/dim]")
+                # Copy SO citations from the first processed finding
+                original_finding = processed_cache[dedup_key]
+                if original_finding.stackoverflow_fixes:
+                    finding.stackoverflow_fixes = original_finding.stackoverflow_fixes
+                if original_finding.citations:
+                    finding.citations = original_finding.citations.copy() if finding.citations else original_finding.citations
                 continue
-                
-            processed_cache.add(dedup_key)
+
+            processed_cache[dedup_key] = finding  # Store the finding for copying later
             
             console.log(f"[bold cyan]({total_processed + i}/{len(limited_findings)}) Processing:[/bold cyan] {finding.vuln_id} [{finding.severity.value.upper()}]")
             

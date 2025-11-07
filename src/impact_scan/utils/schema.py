@@ -36,6 +36,7 @@ class Finding(BaseModel):
     citations: Optional[List[str]] = None
     citation: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    stackoverflow_fixes: Optional[List['StackOverflowFix']] = None
     
     @field_validator('file_path')
     @classmethod
@@ -129,6 +130,30 @@ class Finding(BaseModel):
         return v
 
 
+class CodeBlock(BaseModel):
+    """Represents a code block extracted from Stack Overflow."""
+    language: str
+    code: str
+
+
+class StackOverflowFix(BaseModel):
+    """Represents a Stack Overflow answer with code fixes and metadata."""
+    url: str
+    title: str
+    question_id: str
+    answer_id: str
+    votes: int
+    accepted: bool
+    author: str
+    author_reputation: int
+    post_date: str
+    code_snippets: List[CodeBlock]
+    explanation: str
+    comments: List[str]
+    gemini_analysis: Optional[str] = None  # Gemini's validation/analysis
+    score: float
+
+
 class AIProvider(str, Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
@@ -197,6 +222,10 @@ class ScanConfig(BaseModel):
     web_search_batch_size: int = 10
     web_search_delay: float = 2.0
     prioritize_high_severity: bool = True
+    enable_stackoverflow_scraper: bool = True
+    stackoverflow_max_answers: int = 3
+    stackoverflow_scrape_delay: float = 4.0
+    stackoverflow_include_comments: bool = True
 
     @field_validator('root_path')
     @classmethod
@@ -302,4 +331,5 @@ class EntryPoint(BaseModel):
         return v
 
 # Update model forward references
+Finding.model_rebuild()
 ScanResult.model_rebuild()
