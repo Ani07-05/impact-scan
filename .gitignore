@@ -162,3 +162,7 @@ demo_*.json
 !CLAUDE.md
 !CONTRIBUTING.md
 !LICENSE.md
+
+# Claude Code configuration
+.claude/
+CLAUDE.md
