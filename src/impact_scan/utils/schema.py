@@ -1,9 +1,10 @@
-from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import List, Optional, Dict, Any
+import re
+import time
 from enum import Enum
 from pathlib import Path
-import time
-import re
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Severity(str, Enum):
@@ -36,108 +37,154 @@ class Finding(BaseModel):
     citations: Optional[List[str]] = None
     citation: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
-    stackoverflow_fixes: Optional[List['StackOverflowFix']] = None
-    
-    @field_validator('file_path')
+    stackoverflow_fixes: Optional[List["StackOverflowFix"]] = None
+
+    @field_validator("file_path")
     @classmethod
     def validate_file_path(cls, v):
         """Validate file path to prevent path traversal attacks."""
         if not isinstance(v, Path):
             v = Path(v)
-        
+
         # Resolve path to detect any traversal attempts
         try:
             resolved_path = v.resolve()
         except (OSError, RuntimeError) as e:
             raise ValueError(f"Invalid file path: {e}")
-        
+
         # Check for suspicious path components
         path_str = str(resolved_path)
-        if '..' in path_str or path_str.startswith('~'):
+        if ".." in path_str or path_str.startswith("~"):
             raise ValueError("Path traversal attempts are not allowed")
-        
+
         return resolved_path
-    
-    @field_validator('line_number')
+
+    @field_validator("line_number")
     @classmethod
     def validate_line_number(cls, v):
         if not isinstance(v, int):
-            raise ValueError('Line number must be an integer')
+            raise ValueError("Line number must be an integer")
         if v < 1:
-            raise ValueError('Line number must be positive')
+            raise ValueError("Line number must be positive")
         if v > 1000000:  # Reasonable upper limit
-            raise ValueError('Line number is unreasonably large')
+            raise ValueError("Line number is unreasonably large")
         return v
-    
-    @field_validator('vuln_id')
+
+    @field_validator("vuln_id")
     @classmethod
     def validate_vuln_id(cls, v):
         if not isinstance(v, str):
-            raise ValueError('Vulnerability ID must be a string')
+            raise ValueError("Vulnerability ID must be a string")
         v = v.strip()
         if not v:
-            raise ValueError('Vulnerability ID cannot be empty')
+            raise ValueError("Vulnerability ID cannot be empty")
         if len(v) > 200:  # Reasonable limit
-            raise ValueError('Vulnerability ID is too long')
+            raise ValueError("Vulnerability ID is too long")
         # Allow alphanumeric, hyphens, underscores, dots, commas, and spaces for multi-ID strings
-        if not re.match(r'^[a-zA-Z0-9._,\s-]+$', v):
-            raise ValueError('Vulnerability ID contains invalid characters')
+        if not re.match(r"^[a-zA-Z0-9._,\s-]+$", v):
+            raise ValueError("Vulnerability ID contains invalid characters")
         return v
-    
-    @field_validator('rule_id')
+
+    @field_validator("rule_id")
     @classmethod
     def validate_rule_id(cls, v):
         if not isinstance(v, str):
-            raise ValueError('Rule ID must be a string')
+            raise ValueError("Rule ID must be a string")
         v = v.strip()
         if not v:
-            raise ValueError('Rule ID cannot be empty')
+            raise ValueError("Rule ID cannot be empty")
         if len(v) > 200:  # Reasonable limit
-            raise ValueError('Rule ID is too long')
+            raise ValueError("Rule ID is too long")
         return v
-    
-    @field_validator('title')
+
+    @field_validator("title")
     @classmethod
     def validate_title(cls, v):
         if not isinstance(v, str):
-            raise ValueError('Title must be a string')
+            raise ValueError("Title must be a string")
         v = v.strip()
         if not v:
-            raise ValueError('Title cannot be empty')
+            raise ValueError("Title cannot be empty")
         if len(v) > 500:  # Reasonable limit
-            raise ValueError('Title is too long')
+            raise ValueError("Title is too long")
         return v
-    
-    @field_validator('code_snippet')
+
+    @field_validator("code_snippet")
     @classmethod
     def validate_code_snippet(cls, v):
         if not isinstance(v, str):
-            raise ValueError('Code snippet must be a string')
+            raise ValueError("Code snippet must be a string")
         if len(v) > 10000:  # Reasonable limit for code snippets
-            raise ValueError('Code snippet is too long')
+            raise ValueError("Code snippet is too long")
         return v
-    
-    @field_validator('description')
+
+    @field_validator("description")
     @classmethod
     def validate_description(cls, v):
         if not isinstance(v, str):
-            raise ValueError('Description must be a string')
+            raise ValueError("Description must be a string")
         v = v.strip()
         if not v:
-            raise ValueError('Description cannot be empty')
+            raise ValueError("Description cannot be empty")
         if len(v) > 5000:  # Reasonable limit
-            raise ValueError('Description is too long')
+            raise ValueError("Description is too long")
         return v
 
 
 class CodeBlock(BaseModel):
     """Represents a code block extracted from Stack Overflow."""
+
     language: str
     code: str
 
 
+class UpgradeRecommendation(BaseModel):
+    """Actionable upgrade guidance for vulnerable dependencies"""
+
+    recommended_version: str
+    urgency: str  # 'immediate', 'high', 'medium', 'low'
+    upgrade_path: List[str]  # Step-by-step versions to upgrade through
+    known_breaking_changes: List[str] = Field(default_factory=list)
+    alternative_packages: List[str] = Field(default_factory=list)
+    workarounds: Optional[str] = None
+
+
+class DependencyFinding(Finding):
+    """Extended Finding model for dependency vulnerabilities"""
+
+    package_name: str
+    package_version: str
+    ecosystem: str  # python, javascript, java, go, rust, ruby
+
+    # Vulnerability details
+    cvss_score: Optional[float] = None
+    cvss_vector: Optional[str] = None
+    cwe_ids: List[str] = Field(default_factory=list)
+
+    # Version information
+    affected_versions: List[str] = Field(default_factory=list)
+    patched_versions: List[str] = Field(default_factory=list)
+    latest_version: Optional[str] = None
+    latest_safe_version: Optional[str] = None
+
+    # Dependency tree context
+    is_direct_dependency: bool = True
+    dependency_path: List[str] = Field(
+        default_factory=list
+    )  # Chain showing how it's included
+
+    # Upgrade recommendations
+    upgrade_recommendation: Optional[UpgradeRecommendation] = None
+    breaking_changes_likely: bool = False
+
+    # Source tracking
+    data_sources: List[str] = Field(default_factory=list)  # ['OSV', 'GitHub', 'NVD']
+    aliases: List[str] = Field(default_factory=list)  # Other CVE/GHSA IDs
+
+
 class StackOverflowFix(BaseModel):
     """Represents a Stack Overflow answer with code fixes and metadata."""
+
     url: str
     title: str
     question_id: str
@@ -158,56 +205,108 @@ class AIProvider(str, Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     GEMINI = "gemini"
+    GROQ = "groq"
     LOCAL = "local"
 
 
 class APIKeys(BaseModel):
     """API keys for AI providers."""
+
     openai: Optional[str] = None
     anthropic: Optional[str] = None
     gemini: Optional[str] = None
+    groq: Optional[str] = None
     stackoverflow: Optional[str] = None
+    parsebot: Optional[str] = None
 
     def __init__(self, **data):
         """Initialize with environment variable auto-detection."""
         import os
 
         # Auto-detect from environment if not explicitly provided
-        if 'openai' not in data and not data.get('openai'):
-            data['openai'] = os.getenv('OPENAI_API_KEY')
-        if 'anthropic' not in data and not data.get('anthropic'):
-            data['anthropic'] = os.getenv('ANTHROPIC_API_KEY')
-        if 'gemini' not in data and not data.get('gemini'):
-            data['gemini'] = os.getenv('GOOGLE_API_KEY')
-        if 'stackoverflow' not in data and not data.get('stackoverflow'):
-            data['stackoverflow'] = os.getenv('STACKOVERFLOW_API_KEY')
+        if "openai" not in data and not data.get("openai"):
+            data["openai"] = os.getenv("OPENAI_API_KEY")
+        if "anthropic" not in data and not data.get("anthropic"):
+            data["anthropic"] = os.getenv("ANTHROPIC_API_KEY")
+        if "gemini" not in data and not data.get("gemini"):
+            data["gemini"] = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if "groq" not in data and not data.get("groq"):
+            data["groq"] = os.getenv("GROQ_API_KEY")
+        if "stackoverflow" not in data and not data.get("stackoverflow"):
+            data["stackoverflow"] = os.getenv("STACKOVERFLOW_API_KEY")
+        if "parsebot" not in data and not data.get("parsebot"):
+            data["parsebot"] = os.getenv("PARSEBOT_API_KEY")
 
         super().__init__(**data)
-    
-    @field_validator('openai', 'anthropic', 'gemini', 'stackoverflow')
+
+    @field_validator("openai", "anthropic", "gemini", "stackoverflow", "parsebot")
     @classmethod
     def validate_api_keys(cls, v):
         """Validate API keys format and prevent injection."""
         if v is None:
             return v
-        
+
         if not isinstance(v, str):
-            raise ValueError('API key must be a string')
-        
+            raise ValueError("API key must be a string")
+
         v = v.strip()
         if not v:
             return None  # Empty string becomes None
-        
+
         # Basic format validation
         if len(v) < 10:
-            raise ValueError('API key is too short to be valid')
+            raise ValueError("API key is too short to be valid")
         if len(v) > 500:
-            raise ValueError('API key is too long')
-        
+            raise ValueError("API key is too long")
+
         # Check for suspicious characters
-        if any(char in v for char in ['\n', '\r', '\t', ';', '|', '&']):
-            raise ValueError('API key contains invalid characters')
-        
+        if any(char in v for char in ["\n", "\r", "\t", ";", "|", "&"]):
+            raise ValueError("API key contains invalid characters")
+
+        return v
+
+
+class IgnoreRule(BaseModel):
+    """Represents a rule for ignoring/suppressing findings."""
+
+    cwe: Optional[str] = None  # e.g., "CWE-89"
+    cve: Optional[str] = None  # e.g., "CVE-2023-12345"
+    rule_id: Optional[str] = None  # e.g., "python.django.security.injection.sql"
+    path: Optional[str] = None  # Glob pattern, e.g., "tests/**", "legacy/*.py"
+    severity: Optional[str] = None  # "low", "medium", "high", "critical"
+    reason: Optional[str] = None  # Why this is being ignored
+    expires: Optional[str] = None  # ISO date string: "2025-12-31"
+
+    @field_validator("cwe")
+    @classmethod
+    def validate_cwe(cls, v):
+        if v is None:
+            return v
+        if not re.match(r"^CWE-\d+$", v):
+            raise ValueError("CWE must be in format: CWE-XXX")
+        return v
+
+    @field_validator("cve")
+    @classmethod
+    def validate_cve(cls, v):
+        if v is None:
+            return v
+        if not re.match(r"^CVE-\d{4}-\d{4,7}$", v):
+            raise ValueError("CVE must be in format: CVE-YYYY-XXXXX")
+        return v
+
+    @field_validator("expires")
+    @classmethod
+    def validate_expires(cls, v):
+        if v is None:
+            return v
+        # Validate ISO date format
+        from datetime import datetime
+
+        try:
+            datetime.fromisoformat(v)
+        except ValueError:
+            raise ValueError("expires must be in ISO date format: YYYY-MM-DD")
         return v
 
 
@@ -216,78 +315,93 @@ class ScanConfig(BaseModel):
     min_severity: Severity = Severity.MEDIUM
     enable_ai_fixes: bool = False
     enable_web_search: bool = False
+    enable_ai_validation: bool = False  # AI-powered false positive reduction
     ai_provider: Optional[AIProvider] = None
+    ai_validation_provider: Optional[str] = None  # Override AI provider for validation
+    ai_validation_max_findings: Optional[int] = (
+        None  # Limit findings to validate (cost control)
+    )
+    save_false_positives: bool = False  # Save FPs to file for review
+    enable_ai_deep_scan: bool = (
+        False  # AI-powered deep security audit (discovers new vulns)
+    )
+    ai_audit_max_files: int = 20  # Maximum files to audit in deep scan (cost control)
+    enable_semantic_analysis: bool = (
+        False  # Framework semantic analysis (missing params, misconfigurations)
+    )
     api_keys: APIKeys = Field(default_factory=APIKeys)
     web_search_limit: int = 100
     web_search_batch_size: int = 10
     web_search_delay: float = 2.0
     prioritize_high_severity: bool = True
     enable_stackoverflow_scraper: bool = True
+    stackoverflow_scraper_method: str = "auto"  # 'parsebot', 'playwright', 'auto'
     stackoverflow_max_answers: int = 3
     stackoverflow_scrape_delay: float = 4.0
     stackoverflow_include_comments: bool = True
+    ignore_rules: List[IgnoreRule] = Field(default_factory=list)  # NEW: Ignore rules
 
-    @field_validator('root_path')
+    @field_validator("root_path")
     @classmethod
     def validate_root_path(cls, v):
         """Validate root path and prevent directory traversal."""
         if not isinstance(v, Path):
             v = Path(v)
-        
+
         # Resolve to detect traversal attempts
         try:
             v = v.resolve()
         except (OSError, RuntimeError) as e:
-            raise ValueError(f'Invalid root path: {e}')
-        
+            raise ValueError(f"Invalid root path: {e}")
+
         # Check path exists
         if not v.exists():
-            raise ValueError(f'Target path does not exist: {v}')
-        
+            raise ValueError(f"Target path does not exist: {v}")
+
         # Must be a directory
         if not v.is_dir():
-            raise ValueError(f'Target path must be a directory: {v}')
-        
+            raise ValueError(f"Target path must be a directory: {v}")
+
         # Check for reasonable path length
         if len(str(v)) > 1000:
-            raise ValueError('Root path is too long')
-        
+            raise ValueError("Root path is too long")
+
         return v
-    
-    @field_validator('web_search_limit')
+
+    @field_validator("web_search_limit")
     @classmethod
     def validate_web_search_limit(cls, v):
         if not isinstance(v, int):
-            raise ValueError('Web search limit must be an integer')
+            raise ValueError("Web search limit must be an integer")
         if v < 0:
-            raise ValueError('Web search limit cannot be negative')
+            raise ValueError("Web search limit cannot be negative")
         if v > 10000:
-            raise ValueError('Web search limit is too high (max 10000)')
+            raise ValueError("Web search limit is too high (max 10000)")
         return v
-    
-    @field_validator('web_search_batch_size')
+
+    @field_validator("web_search_batch_size")
     @classmethod
     def validate_web_search_batch_size(cls, v):
         if not isinstance(v, int):
-            raise ValueError('Web search batch size must be an integer')
+            raise ValueError("Web search batch size must be an integer")
         if v < 1:
-            raise ValueError('Web search batch size must be at least 1')
+            raise ValueError("Web search batch size must be at least 1")
         if v > 1000:
-            raise ValueError('Web search batch size is too high (max 1000)')
+            raise ValueError("Web search batch size is too high (max 1000)")
         return v
-    
-    @field_validator('web_search_delay')
+
+    @field_validator("web_search_delay")
     @classmethod
     def validate_web_search_delay(cls, v):
         if not isinstance(v, (int, float)):
-            raise ValueError('Web search delay must be a number')
+            raise ValueError("Web search delay must be a number")
         if v < 0:
-            raise ValueError('Web search delay cannot be negative')
+            raise ValueError("Web search delay cannot be negative")
         if v > 3600:  # 1 hour max
-            raise ValueError('Web search delay is too high (max 3600 seconds)')
+            raise ValueError("Web search delay is too high (max 3600 seconds)")
         return v
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def check_ai_config(self):
         if self.enable_ai_fixes and not self.ai_provider:
             raise ValueError("AI fixes enabled, but no 'ai_provider' was specified.")
@@ -297,22 +411,22 @@ class ScanConfig(BaseModel):
 class ScanResult(BaseModel):
     config: ScanConfig
     findings: List[Finding]
-    entry_points: List['EntryPoint']
+    entry_points: List["EntryPoint"]
     scanned_files: int
     scan_duration: float
     timestamp: float = Field(default_factory=time.time)
-    
+
     @property
     def findings_by_severity(self) -> Dict[Severity, List[Finding]]:
         result = {severity: [] for severity in Severity}
         for finding in self.findings:
             result[finding.severity].append(finding)
         return result
-    
+
     @property
     def total_findings(self) -> int:
         return len(self.findings)
-    
+
     @property
     def critical_findings(self) -> List[Finding]:
         return [f for f in self.findings if f.severity == Severity.CRITICAL]
@@ -322,13 +436,14 @@ class EntryPoint(BaseModel):
     path: Path
     framework: str
     confidence: float = Field(..., ge=0.0, le=1.0)
-    
-    @field_validator('confidence')
+
+    @field_validator("confidence")
     @classmethod
     def validate_confidence(cls, v):
         if not 0.0 <= v <= 1.0:
-            raise ValueError('Confidence must be between 0.0 and 1.0')
+            raise ValueError("Confidence must be between 0.0 and 1.0")
         return v
+
 
 # Update model forward references
 Finding.model_rebuild()

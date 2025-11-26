@@ -1,536 +1,564 @@
+#!/usr/bin/env python3
 """
-Main TUI application for Impact Scan with compact, terminal-friendly layout.
-"""
-import asyncio
-import logging
-import os
-import time
-from pathlib import Path
-from typing import Optional, List
+Impact Scan - Ultra-Modern TUI (OpenTUI-inspired)
 
+Clean, professional, minimal design.
+No emojis. Pure functionality.
+"""
+
+import logging
+import time
+import webbrowser
+from pathlib import Path
+from typing import Optional
+
+from textual import on, work
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical, Grid
-from textual.widgets import (
-    Button, DataTable, DirectoryTree, Footer, Header, Input, Label,
-    ProgressBar, RichLog, Static, Select, Switch, LoadingIndicator,
-    TabbedContent, TabPane
+from textual.binding import Binding
+from textual.containers import (
+    Container,
+    Grid,
+    Horizontal,
+    Vertical,
 )
 from textual.reactive import reactive
-from textual.binding import Binding
-from textual.screen import ModalScreen
+from textual.widgets import (
+    Button,
+    DataTable,
+    Footer,
+    Header,
+    Input,
+    Label,
+    Log,
+    ProgressBar,
+    Select,
+    Static,
+)
 
-from impact_scan.utils import schema
-from impact_scan.core import entrypoint, aggregator, fix_ai
+from impact_scan.core import aggregator, entrypoint, fix_ai
 from impact_scan.core.html_report import save_report
-from impact_scan.utils import profiles
+from impact_scan.utils import profiles, schema
+
+# Import modular TUI components
+from .screens import APIKeysModal, PathBrowserModal
+from .theme import MAIN_CSS
+
+# ============================================================================
+# MAIN APPLICATION
+# ============================================================================
 
 
-class PathBrowserScreen(ModalScreen):
-    """Compact modal for path selection."""
-    
-    CSS = """
-    PathBrowserScreen {
-        align: center middle;
+class UltraModernTUI(App):
+    """Ultra-modern, minimal TUI inspired by OpenTUI."""
+
+    CSS = MAIN_CSS  # Import from theme.py
+
+    # Define color scheme from theme
+    COLORS = {
+        "primary": "#00A8E8",
+        "secondary": "#6C757D",
+        "accent": "#00D9FF",
+        "error": "#FF4757",
+        "warning": "#FFA502",
+        "success": "#2ED573",
+        "background": "#1E1E2E",
+        "surface": "#2A2A3E",
     }
 
-    #path-dialog {
-        width: 80;
-        height: 30;
-        background: $panel;
-        border: thick $primary;
-        padding: 1;
-    }
+    TITLE = "Impact Scan | Security Analysis Platform"
+    SUB_TITLE = "AI-Powered Vulnerability Detection"
 
-    #path-tree {
-        height: 22;
-        border: solid $primary-lighten-2;
-    }
-
-    .modal-buttons {
-        dock: bottom;
-        height: 3;
-        align: center middle;
-    }
-
-    .modal-buttons Button {
-        margin: 0 1;
-        width: 12;
-    }
-
-    #current-path {
-        background: $surface-lighten-1;
-        padding: 0 1;
-        text-style: bold;
-        margin-bottom: 1;
-    }
-    """
-    
-    def __init__(self, current_path: Path = None):
-        super().__init__()
-        self.current_path = current_path or Path.cwd()
-        self.selected_path = self.current_path
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="path-dialog"):
-            yield Static("🗂️ Full Filesystem Browser - Navigate to any directory", classes="title")
-            yield Static(f"📁 {self.selected_path}", id="current-path")
-            # Start from root filesystem to allow full navigation
-            tree = DirectoryTree("/", id="path-tree")
-            # Try to expand to current path initially if possible
-            yield tree
-            with Horizontal(classes="modal-buttons"):
-                yield Button("Home", id="home-btn")
-                yield Button("Select", variant="success", id="select-btn")
-                yield Button("Cancel", id="cancel-btn")
-    
-    def on_directory_tree_directory_selected(self, event: DirectoryTree.DirectorySelected) -> None:
-        self.selected_path = Path(event.path)
-        self.query_one("#current-path").update(f"📁 {self.selected_path}")
-    
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "select-btn":
-            self.dismiss(self.selected_path or self.current_path)
-        elif event.button.id == "cancel-btn":
-            self.dismiss(None)
-        elif event.button.id == "home-btn":
-            # Navigate to home directory
-            home_path = Path.home()
-            self.selected_path = home_path
-            self.query_one("#current-path").update(f"📁 {self.selected_path}")
-            # Refresh tree to show home directory
-            tree = self.query_one("#path-tree", DirectoryTree)
-            try:
-                tree.reload_node(tree.root)
-            except:
-                pass  # If reload fails, that's ok
-
-
-class APIKeyScreen(ModalScreen):
-    """Compact API key configuration modal."""
-    
-    CSS = """
-    APIKeyScreen {
-        align: center middle;
-    }
-    
-    #api-dialog {
-        width: 50;
-        height: 16;
-        background: $panel;
-        border: thick $primary;
-        padding: 1;
-    }
-    
-    .key-grid {
-        grid-size: 2;
-        grid-gutter: 1;
-        height: auto;
-        margin: 1 0;
-    }
-    
-    .key-input {
-        width: 100%;
-    }
-    
-    .modal-buttons {
-        dock: bottom;
-        height: 3;
-        align: center middle;
-    }
-    
-    .modal-buttons Button {
-        margin: 0 1;
-        width: 10;
-    }
-    """
-    
-    def compose(self) -> ComposeResult:
-        with Vertical(id="api-dialog"):
-            yield Static("🔑 API Keys")
-            with Grid(classes="key-grid"):
-                yield Static("OpenAI:")
-                yield Input(placeholder="sk-...", password=True, id="openai-key", 
-                           value=os.getenv("OPENAI_API_KEY", ""))
-                yield Static("Claude:")
-                yield Input(placeholder="sk-ant-...", password=True, id="anthropic-key",
-                           value=os.getenv("ANTHROPIC_API_KEY", ""))
-                yield Static("Gemini:")
-                yield Input(placeholder="AIza...", password=True, id="gemini-key",
-                           value=os.getenv("GOOGLE_API_KEY", ""))
-            
-            with Horizontal(classes="modal-buttons"):
-                yield Button("Save", variant="success", id="save-keys")
-                yield Button("Cancel", id="cancel-keys")
-    
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "save-keys":
-            # Save keys to environment
-            if self.query_one("#openai-key", Input).value.strip():
-                os.environ["OPENAI_API_KEY"] = self.query_one("#openai-key", Input).value.strip()
-            if self.query_one("#anthropic-key", Input).value.strip():
-                os.environ["ANTHROPIC_API_KEY"] = self.query_one("#anthropic-key", Input).value.strip()
-            if self.query_one("#gemini-key", Input).value.strip():
-                os.environ["GOOGLE_API_KEY"] = self.query_one("#gemini-key", Input).value.strip()
-            self.dismiss(True)
-        elif event.button.id == "cancel-keys":
-            self.dismiss(False)
-
-
-class ImpactScanTUI(App):
-    """A modern TUI for Impact Scan."""
-
-    CSS_PATH = "app.css"
-    
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("s", "scan", "Scan"),
-        ("b", "browse", "Browse"),
-        ("k", "keys", "Keys"),
-        ("c", "clear", "Clear"),
-        Binding("t", "toggle_sidebar", "Toggle Sidebar", show=True),
+        Binding("q", "quit", "Quit"),
+        Binding("s", "start_scan", "Scan"),
+        Binding("b", "browse_path", "Browse"),
+        Binding("k", "manage_keys", "Keys"),
+        Binding("c", "clear_log", "Clear"),
     ]
-    
-    show_sidebar = reactive(True)
+
     scan_running = reactive(False)
-
-    def watch_show_sidebar(self, show_sidebar: bool) -> None:
-        """Called when show_sidebar is modified."""
-        self.query_one("#sidebar").display = show_sidebar
-
-    def action_toggle_sidebar(self) -> None:
-        """Toggle the sidebar."""
-        self.show_sidebar = not self.show_sidebar
+    current_config: Optional[schema.ScanConfig] = None
+    current_results: Optional[schema.ScanResult] = None
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Horizontal():
-            with Vertical(id="sidebar"):
-                yield Static("Configuration", classes="title")
-                with Vertical(classes="config-group"):
-                    yield Label("Scan Path")
-                    with Horizontal():
-                        yield Input(placeholder="Path", id="scan-path", classes="config-item")
-                        yield Button("📁", id="browse-btn", classes="config-btn")
-                with Vertical(classes="config-group"):
-                    yield Label("Profile")
-                    yield Select(
-                        [(p, p.lower()) for p in ["Comprehensive", "Quick", "Standard", "CI"]],
-                        value="comprehensive",
-                        id="profile-select",
-                        classes="config-item",
-                    )
-                with Vertical(classes="config-group"):
-                    yield Label("AI Provider")
-                    yield Select(
-                        [("Auto", "auto"), ("OpenAI", "openai"), ("Anthropic", "anthropic"),
-                         ("Gemini", "gemini"), ("None", "none")],
-                        value="auto",
-                        id="ai-select",
-                        classes="config-item",
-                    )
-                with Vertical(classes="config-group"):
-                    yield Label("Stack Overflow Citations")
-                    with Horizontal(classes="switch-container"):
-                        yield Switch(value=True, id="stackoverflow-switch")
-                        yield Static("Enable SO fixes", classes="switch-label")
-                with Horizontal(id="action-buttons"):
-                    yield Button("Scan", variant="success", id="start-scan")
-                    yield Button("API Keys", id="api-keys-btn")
 
-            with Vertical(id="main-content"):
-                with Horizontal(id="stats-bar"):
-                    yield Static("Total: 0", classes="stat total", id="total")
-                    yield Static("Crit: 0", classes="stat critical", id="critical")
-                    yield Static("High: 0", classes="stat high", id="high")
-                    yield Static("Med: 0", classes="stat medium", id="medium")
-                    yield Static("Low: 0", classes="stat low", id="low")
-                
-                table = DataTable(id="results-table", zebra_stripes=True, cursor_type="row")
-                table.add_columns("SEV", "Type", "File", "Line", "Description")
-                yield table
+        with Horizontal(classes="layout"):
+            # Left panel: Configuration & Progress
+            with Vertical(classes="left-panel"):
+                # Configuration
+                with Container(classes="config-panel"):
+                    yield Static("Configuration", classes="panel-header")
 
-                with TabbedContent(id="details-tabs"):
-                    with TabPane("Logs", id="log-tab"):
-                        yield RichLog(highlight=True, markup=True, id="scan-log", auto_scroll=True)
-                    with TabPane("Details", id="details-tab"):
-                        yield RichLog(id="details-log", highlight=True)
-        
+                    with Container(classes="config-section"):
+                        with Horizontal(classes="config-row"):
+                            yield Label("Path:", classes="config-label")
+                            yield Input(
+                                placeholder="/path/to/scan",
+                                id="scan-path",
+                                classes="config-input",
+                            )
+                            yield Button(
+                                "...",
+                                variant="primary",
+                                id="browse-btn",
+                                classes="mini-btn",
+                            )
+
+                    with Container(classes="config-section"):
+                        with Horizontal(classes="config-row"):
+                            yield Label("Profile:", classes="config-label")
+                            yield Select(
+                                options=[
+                                    ("Comprehensive", "comprehensive"),
+                                    ("Quick", "quick"),
+                                    ("Standard", "standard"),
+                                    ("CI/CD", "ci"),
+                                ],
+                                value="comprehensive",
+                                id="profile-select",
+                                classes="config-select",
+                            )
+
+                        with Horizontal(classes="config-row"):
+                            yield Label("AI Provider:", classes="config-label")
+                            yield Select(
+                                options=[
+                                    ("Auto-Detect", "auto"),
+                                    ("OpenAI", "openai"),
+                                    ("Anthropic", "anthropic"),
+                                    ("Gemini", "gemini"),
+                                    ("None", "none"),
+                                ],
+                                value="auto",
+                                id="ai-select",
+                                classes="config-select",
+                            )
+                            yield Button(
+                                "K",
+                                variant="default",
+                                id="keys-btn",
+                                classes="mini-btn",
+                            )
+
+                    yield Button(
+                        "Start Scan",
+                        variant="success",
+                        id="start-scan-btn",
+                        classes="scan-button",
+                    )
+
+                # Progress
+                with Container(classes="progress-panel"):
+                    yield Static("Activity", classes="panel-header")
+
+                    with Container(classes="progress-bar-container"):
+                        yield ProgressBar(total=100, show_eta=False, id="scan-progress")
+
+                    yield Static("Ready", classes="status-line", id="status-text")
+
+                    yield Log(
+                        highlight=True,
+                        classes="activity-log",
+                        id="scan-log",
+                        auto_scroll=True,
+                    )
+
+            # Right panel: Metrics & Findings
+            with Vertical(classes="right-panel"):
+                # Metrics
+                with Container(classes="metrics-panel"):
+                    yield Static("Security Metrics", classes="panel-header")
+
+                    with Grid(classes="metrics-grid"):
+                        with Container(classes="metric"):
+                            yield Static("0", classes="metric-value", id="total-value")
+                            yield Static("Total", classes="metric-label")
+
+                        with Container(classes="metric metric-critical"):
+                            yield Static(
+                                "0", classes="metric-value", id="critical-value"
+                            )
+                            yield Static("Critical", classes="metric-label")
+
+                        with Container(classes="metric metric-high"):
+                            yield Static("0", classes="metric-value", id="high-value")
+                            yield Static("High", classes="metric-label")
+
+                        with Container(classes="metric metric-medium"):
+                            yield Static("0", classes="metric-value", id="medium-value")
+                            yield Static("Medium", classes="metric-label")
+
+                        with Container(classes="metric metric-low"):
+                            yield Static("0", classes="metric-value", id="low-value")
+                            yield Static("Low", classes="metric-label")
+
+                        with Container(classes="metric"):
+                            yield Static(
+                                "100", classes="metric-value", id="score-value"
+                            )
+                            yield Static("Score", classes="metric-label")
+
+                # Findings
+                with Container(classes="findings-panel"):
+                    yield Static("Findings", classes="panel-header")
+
+                    table = DataTable(
+                        classes="findings-table",
+                        id="findings-table",
+                        zebra_stripes=True,
+                    )
+                    table.add_columns("Severity", "Type", "File", "Line", "Description")
+                    yield table
+
+                    with Horizontal(classes="export-bar"):
+                        yield Button(
+                            "Export HTML",
+                            variant="success",
+                            classes="export-btn",
+                            id="export-html",
+                        )
+                        yield Button(
+                            "Export SARIF",
+                            variant="primary",
+                            classes="export-btn",
+                            id="export-sarif",
+                        )
+
         yield Footer()
 
     def on_mount(self) -> None:
-        """Initialize on mount."""
-        self.current_results = None
-        self.current_config = None
+        """Initialize application."""
         self.query_one("#scan-path", Input).value = str(Path.cwd())
-        
-        # Note: Column widths will be set by CSS if needed
-        
-        self.log_message("Ready. Press 's' to scan or 't' to toggle sidebar.")
+        self.log_message("System initialized")
         self.check_api_keys()
 
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Handle row selection to show details."""
-        details_log = self.query_one("#details-log", RichLog)
-        details_log.clear()
-        
-        if self.current_results and self.current_results.findings:
-            try:
-                finding = self.current_results.findings[event.cursor_row]
-                details_log.write(f"[bold]Finding Details[/bold]\n")
-                details_log.write(f"ID: {finding.vuln_id}")
-                details_log.write(f"Severity: {finding.severity.value}")
-                details_log.write(f"File: {finding.file_path}:{finding.line_number}")
-                details_log.write(f"\n[bold]Description[/bold]\n{finding.description}\n")
-                
-                # Display available fixes
-                if finding.ai_fix:
-                    details_log.write(f"[bold green]AI Generated Fix[/bold green]\n")
-                    details_log.write(f"```diff\n{finding.ai_fix}\n```\n")
-                
-                if finding.web_fix:
-                    details_log.write(f"[bold blue]Web Research Fix[/bold blue]\n")
-                    details_log.write(f"{finding.web_fix}\n")
-                
-                if finding.fix_suggestion:
-                    details_log.write(f"[bold yellow]Fix Suggestion[/bold yellow]\n")
-                    details_log.write(f"{finding.fix_suggestion}\n")
-
-                self.query_one("#details-tabs").active = "details-tab"
-            except IndexError:
-                details_log.write("Could not retrieve finding details.")
-
     def check_api_keys(self) -> None:
-        """Check for available API keys."""
-        keys = schema.APIKeys()
-        available = []
-        if keys.openai: available.append("OpenAI")
-        if keys.anthropic: available.append("Anthropic")
-        if keys.gemini: available.append("Gemini")
-        
-        if available:
-            self.log_message(f"AI providers available: [bold]{', '.join(available)}[/bold]")
+        """Check available API keys."""
+        api_keys = schema.APIKeys()
+        providers = []
+
+        if api_keys.openai:
+            providers.append("OpenAI")
+        if api_keys.anthropic:
+            providers.append("Anthropic")
+        if api_keys.gemini:
+            providers.append("Gemini")
+
+        if providers:
+            self.log_message(f"AI: {', '.join(providers)}")
         else:
-            self.log_message("[yellow]No API keys found. Press 'k' to configure.[/yellow]")
-    
+            self.log_message("No API keys configured (press 'k')")
+
     def log_message(self, message: str) -> None:
-        """Log a message to the scan log."""
-        self.query_one("#scan-log", RichLog).write(f"[{time.strftime('%H:%M:%S')}] {message}")
-    
+        """Add timestamped message to log."""
+        log_widget = self.query_one("#scan-log", Log)
+        timestamp = time.strftime("%H:%M:%S")
+        log_widget.write(f"[{timestamp}] {message}")
+
+    @on(Button.Pressed)
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
-        button_id = event.button.id
-        if button_id == "start-scan":
-            self.action_scan()
-        elif button_id == "browse-btn":
-            self.action_browse()
-        elif button_id == "api-keys-btn":
-            self.action_keys()
-    
-    def action_scan(self) -> None:
-        """Start a new scan."""
-        if self.scan_running:
-            self.log_message("[bold red]A scan is already in progress.[/bold red]")
-            return
-        
-        path_str = self.query_one("#scan-path", Input).value
-        scan_path = Path(path_str) if path_str else Path.cwd()
-        
-        if not scan_path.exists() or not scan_path.is_dir():
-            self.log_message(f"[bold red]Error: Invalid path '{scan_path}'.[/bold red]")
-            return
-        
-        try:
-            profile_name = self.query_one("#profile-select", Select).value
-            profile = profiles.get_profile(profile_name)
+        handlers = {
+            "start-scan-btn": self.action_start_scan,
+            "browse-btn": self.action_browse_path,
+            "keys-btn": self.action_manage_keys,
+            "export-html": self.action_export_html,
+            "export-sarif": self.action_export_sarif,
+        }
 
-            ai_provider = self.query_one("#ai-select", Select).value
+        handler = handlers.get(event.button.id)
+        if handler:
+            handler()
+
+    def action_start_scan(self) -> None:
+        """Start security scan."""
+        if self.scan_running:
+            self.log_message("Scan already in progress")
+            return
+
+        path_input = self.query_one("#scan-path", Input)
+        if not path_input.value.strip():
+            self.log_message("Error: No path specified")
+            return
+
+        target_path = Path(path_input.value.strip())
+        if not target_path.exists():
+            self.log_message(f"Error: Path not found: {target_path}")
+            return
+
+        # Update status immediately
+        status_text = self.query_one("#status-text", Static)
+        status_text.update("Initializing...")
+        self.log_message("Starting scan...")
+
+        # Get configuration
+        profile_select = self.query_one("#profile-select", Select)
+        ai_select = self.query_one("#ai-select", Select)
+
+        try:
+            profile = profiles.get_profile(profile_select.value)
+
+            # Override AI provider if specified
+            ai_provider = ai_select.value
             if ai_provider == "none":
                 profile.enable_ai_fixes = False
                 profile.ai_provider = None
             elif ai_provider != "auto":
                 profile.ai_provider = ai_provider
 
-            # Get Stack Overflow setting from switch
-            enable_stackoverflow = self.query_one("#stackoverflow-switch", Switch).value
-            profile.enable_stackoverflow_scraper = enable_stackoverflow
-
+            # Create configuration - USE root_path NOT target_path
             config = profiles.create_config_from_profile(
-                root_path=scan_path,
+                root_path=target_path,  # FIX: Use root_path
                 profile=profile,
-                api_keys=schema.APIKeys()
+                api_keys=schema.APIKeys(),
             )
-            
+
             self.current_config = config
-            self.log_message(f"Starting scan on '{scan_path}' with '{profile_name}' profile...")
-            if enable_stackoverflow:
-                self.log_message("[cyan]Stack Overflow citations enabled[/cyan]")
-            else:
-                self.log_message("[dim]Stack Overflow citations disabled[/dim]")
+            self.log_message("Configuration loaded")
 
-            # Clear previous results
-            self.query_one("#results-table", DataTable).clear()
-            self.query_one("#details-log", RichLog).clear()
-            self.reset_stats()
-
-            # Use run_worker to run scan asynchronously in Textual
-            self.run_worker(self.run_scan(config), exclusive=True)
-            
-        except Exception as e:
-            self.log_message(f"[bold red]Failed to start scan: {e}[/bold red]")
-            logging.error(f"Scan configuration failed: {e}", exc_info=True)
-
-    def reset_stats(self):
-        self.query_one("#total").update("Total: 0")
-        self.query_one("#critical").update("Crit: 0")
-        self.query_one("#high").update("High: 0")
-        self.query_one("#medium").update("Med: 0")
-        self.query_one("#low").update("Low: 0")
-
-    async def run_scan(self, config: schema.ScanConfig) -> None:
-        """Run scan asynchronously and update UI."""
-        self.scan_running = True
-        status_bar = self.query_one("#stats-bar")
-        loading_indicator = LoadingIndicator()
-        await status_bar.mount(loading_indicator)
-
-        try:
-            self.log_message("Running dependency and static analysis...")
-            result = await asyncio.to_thread(entrypoint.run_scan, config)
-            
-            if not result or not result.findings:
-                self.log_message("Scan complete. No findings.")
-                self.update_results(result)
-                return
-
-            self.log_message(f"Analysis complete. Found {len(result.findings)} potential issues.")
-            self.update_results(result)
-
-            if config.enable_web_search:
-                self.log_message("Searching for context online with modern intelligence...")
-                await entrypoint.enrich_findings_async(result.findings, config)
-                self.log_message("Modern web intelligence complete.")
-
-            if config.enable_ai_fixes and config.ai_provider:
-                self.log_message("Generating AI-powered fixes...")
-                await asyncio.to_thread(
-                    fix_ai.generate_fixes,
-                    result.findings, config
-                )
-                self.log_message("AI fix generation complete.")
-            
-            self.current_results = result
-            self.update_results(result) # Refresh with fixes
-            self.log_message("[bold green]Scan finished successfully.[/bold green]")
+            # Launch scan worker
+            self.run_scan_worker(config)
 
         except Exception as e:
-            self.log_message(f"[bold red]Scan failed: {e}[/bold red]")
-            logging.error(f"Scan execution failed: {e}", exc_info=True)
-        finally:
-            self.scan_running = False
-            await loading_indicator.remove()
-    
-    def update_results(self, result: Optional[schema.ScanResult]) -> None:
-        """Update results display."""
-        table = self.query_one("#results-table", DataTable)
-        table.clear()
+            self.log_message(f"Configuration error: {e}")
+            logging.error(f"Scan config failed: {e}", exc_info=True)
+            status_text.update("Error")
 
-        if not result or not result.findings:
-            self.reset_stats()
-            return
-        
-        findings = result.findings
-        by_sev = {"critical": 0, "high": 0, "medium": 0, "low": 0}
-        for f in findings:
-            by_sev[f.severity.value] += 1
-        
-        self.query_one("#total").update(f"Total: {len(findings)}")
-        self.query_one("#critical").update(f"Crit: {by_sev['critical']}")
-        self.query_one("#high").update(f"High: {by_sev['high']}")
-        self.query_one("#medium").update(f"Med: {by_sev['medium']}")
-        self.query_one("#low").update(f"Low: {by_sev['low']}")
-        
-        sev_map = {
-            schema.Severity.CRITICAL: "[red]CRIT[/red]",
-            schema.Severity.HIGH: "[orange]HIGH[/orange]",
-            schema.Severity.MEDIUM: "[yellow]MED[/yellow]",
-            schema.Severity.LOW: "[blue]LOW[/blue]",
-        }
-        
-        for f in findings:
-            file_path_str = str(f.file_path)
-            short_path = f"...{file_path_str[-22:]}" if len(file_path_str) > 25 else file_path_str
-            
-            table.add_row(
-                sev_map.get(f.severity, "UNKN"),
-                f.vuln_id,
-                short_path,
-                str(f.line_number) if hasattr(f, 'line_number') else "-",
-                f.description.splitlines()[0],
-            )
-    
-    def action_browse(self) -> None:
-        """Browse for a directory."""
-        def on_select(path: Optional[Path]):
+    def action_browse_path(self) -> None:
+        """Browse for target directory."""
+        current_path = Path(self.query_one("#scan-path", Input).value or Path.cwd())
+
+        def on_path_selected(path: Optional[str]) -> None:
             if path:
-                self.query_one("#scan-path", Input).value = str(path)
-                self.log_message(f"Selected path: '{path}'")
-        
-        current_path = Path(self.query_one("#scan-path", Input).value)
-        self.push_screen(PathBrowserScreen(current_path=current_path), on_select)
-    
-    def action_keys(self) -> None:
-        """Open API key configuration screen."""
-        def on_save(saved: bool):
-            if saved:
-                self.log_message("API keys updated.")
+                self.query_one("#scan-path", Input).value = path
+                self.log_message(f"Selected: {path}")
+
+        self.push_screen(PathBrowserModal(current_path), on_path_selected)
+
+    def action_manage_keys(self) -> None:
+        """Manage API keys."""
+
+        def on_keys_updated(result: Optional[dict]) -> None:
+            if result and result.get("action") == "saved":
+                count = result.get("count", 0)
+                self.log_message(f"Saved {count} API key(s)")
                 self.check_api_keys()
-        
-        self.push_screen(APIKeyScreen(), on_save)
-    
-    def export(self, format_type: str) -> None:
-        """Export scan results."""
+            elif result and result.get("action") == "cleared":
+                self.log_message("API keys cleared")
+
+        self.push_screen(APIKeysModal(), on_keys_updated)
+
+    def action_export_html(self) -> None:
+        """Export HTML report."""
         if not self.current_results:
-            self.log_message("[yellow]No results to export.[/yellow]")
+            self.log_message("No results to export")
             return
-        
+
         try:
             timestamp = int(time.time())
-            filename = f"impact-scan-report-{timestamp}"
-            
-            if format_type == "html":
-                path = Path(f"{filename}.html")
-                save_report(self.current_results, path)
-            elif format_type == "sarif":
-                path = Path(f"{filename}.sarif")
-                aggregator.save_to_sarif(self.current_results, path)
-            else:
-                self.log_message(f"[red]Unknown export format: {format_type}[/red]")
-                return
-            
-            self.log_message(f"Successfully exported results to [bold]'{path}'[/bold]")
-        except Exception as e:
-            self.log_message(f"[bold red]Export failed: {e}[/bold red]")
-            logging.error(f"Export failed: {e}", exc_info=True)
-    
-    def action_clear(self) -> None:
-        """Clear logs and results."""
-        self.query_one("#scan-log", RichLog).clear()
-        self.query_one("#details-log", RichLog).clear()
-        self.query_one("#results-table", DataTable).clear()
-        self.reset_stats()
-        self.log_message("Cleared logs and results.")
+            output_file = Path.cwd() / f"impact_scan_report_{timestamp}.html"
 
-def run_tui() -> None:
-    """Run the TUI application."""
+            self.log_message("Generating HTML report...")
+            save_report(self.current_results, str(output_file))
+            self.log_message(f"Saved: {output_file.name}")
+
+            webbrowser.open(f"file://{output_file.absolute()}")
+
+        except Exception as e:
+            self.log_message(f"Export failed: {e}")
+            logging.exception("HTML export failed")
+
+    def action_export_sarif(self) -> None:
+        """Export SARIF report."""
+        if not self.current_results:
+            self.log_message("No results to export")
+            return
+
+        try:
+            timestamp = int(time.time())
+            output_file = Path.cwd() / f"impact_scan_sarif_{timestamp}.json"
+
+            self.log_message("Generating SARIF report...")
+            aggregator.save_to_sarif(self.current_results, output_file)
+            self.log_message(f"Saved: {output_file.name}")
+
+        except Exception as e:
+            self.log_message(f"SARIF export failed: {e}")
+            logging.exception("SARIF export failed")
+
+    def action_clear_log(self) -> None:
+        """Clear activity log."""
+        log_widget = self.query_one("#scan-log", Log)
+        log_widget.clear()
+        self.log_message("Log cleared")
+
+    @work(exclusive=True, thread=True)
+    def run_scan_worker(self, config: schema.ScanConfig) -> None:
+        """Run security scan in background."""
+        try:
+            self.scan_running = True
+            progress_bar = self.query_one("#scan-progress", ProgressBar)
+            status_text = self.query_one("#status-text", Static)
+
+            progress_bar.update(total=100, progress=0)
+
+            self.log_message(f"Target: {config.root_path}")
+            self.log_message(f"Profile: {config.min_severity.value}")
+            self.log_message(f"AI: {config.ai_provider or 'disabled'}")
+
+            # Phase 1: Entry point detection
+            status_text.update("Analyzing codebase...")
+            progress_bar.update(progress=10)
+
+            scan_result = entrypoint.run_scan(config)
+
+            progress_bar.update(progress=40)
+            status_text.update("Static analysis complete")
+
+            if scan_result.entry_points:
+                self.log_message(f"Found {len(scan_result.entry_points)} entry points")
+
+            progress_bar.update(progress=60)
+
+            # Web search (if enabled)
+            if config.enable_web_search and scan_result.findings:
+                status_text.update("Web intelligence...")
+                progress_bar.update(progress=70)
+
+                try:
+                    from impact_scan.core import web_search
+
+                    web_search.process_findings_for_web_fixes(
+                        scan_result.findings, config
+                    )
+                    self.log_message("Web intelligence complete")
+                except Exception as e:
+                    self.log_message(f"Web search failed: {e}")
+
+                progress_bar.update(progress=80)
+
+            # AI fixes (if enabled)
+            if config.enable_ai_fixes and config.ai_provider and scan_result.findings:
+                status_text.update("Generating AI fixes...")
+                progress_bar.update(progress=85)
+
+                try:
+                    fix_ai.generate_fixes(scan_result.findings, config)
+                    self.log_message("AI fixes generated")
+                except Exception as e:
+                    self.log_message(f"AI fix generation failed: {e}")
+
+                progress_bar.update(progress=95)
+
+            # Complete
+            progress_bar.update(progress=100)
+            status_text.update("Scan complete")
+
+            # Store and display results
+            self.current_results = scan_result
+            self.update_results_display(scan_result)
+
+            # Summary
+            total = len(scan_result.findings)
+            severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+            for finding in scan_result.findings:
+                severity_counts[finding.severity.value.lower()] += 1
+
+            self.log_message(f"Scan complete: {total} findings")
+            self.log_message(
+                f"Critical: {severity_counts['critical']}, High: {severity_counts['high']}, Medium: {severity_counts['medium']}, Low: {severity_counts['low']}"
+            )
+
+        except Exception as e:
+            self.log_message(f"Scan failed: {e}")
+            logging.exception("Scan execution failed")
+            status_text.update("Scan failed")
+        finally:
+            self.scan_running = False
+
+    def update_results_display(self, scan_result: schema.ScanResult) -> None:
+        """Update UI with scan results."""
+        # Calculate metrics
+        total = len(scan_result.findings)
+        severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+
+        for finding in scan_result.findings:
+            severity_counts[finding.severity.value.lower()] += 1
+
+        # Update metric values
+        self.query_one("#total-value", Static).update(str(total))
+        self.query_one("#critical-value", Static).update(
+            str(severity_counts["critical"])
+        )
+        self.query_one("#high-value", Static).update(str(severity_counts["high"]))
+        self.query_one("#medium-value", Static).update(str(severity_counts["medium"]))
+        self.query_one("#low-value", Static).update(str(severity_counts["low"]))
+
+        # Calculate security score
+        if total > 0:
+            score = max(
+                0,
+                100
+                - (
+                    severity_counts["critical"] * 25
+                    + severity_counts["high"] * 10
+                    + severity_counts["medium"] * 5
+                    + severity_counts["low"] * 1
+                ),
+            )
+            self.query_one("#score-value", Static).update(str(score))
+        else:
+            self.query_one("#score-value", Static).update("100")
+
+        # Update findings table
+        table = self.query_one("#findings-table", DataTable)
+        table.clear()
+
+        # Add findings (limit to 100)
+        for finding in scan_result.findings[:100]:
+            severity_display = finding.severity.value.upper()
+
+            file_path_str = str(finding.file_path)
+            short_path = (
+                f"...{file_path_str[-25:]}"
+                if len(file_path_str) > 28
+                else file_path_str
+            )
+
+            description = finding.description or finding.title or "No description"
+            short_desc = (
+                description[:50] + "..." if len(description) > 50 else description
+            )
+
+            table.add_row(
+                severity_display,
+                finding.vuln_id or finding.rule_id or "N/A",
+                short_path,
+                str(finding.line_number) if finding.line_number else "N/A",
+                short_desc,
+            )
+
+        if len(scan_result.findings) > 100:
+            table.add_row(
+                "...", "...", "...", "...", f"+ {len(scan_result.findings) - 100} more"
+            )
+
+        # Force refresh
+        table.refresh()
+        self.refresh()
+
+
+def run_ultra_modern_tui() -> None:
+    """Launch the ultra-modern TUI."""
     logging.basicConfig(
         level="INFO",
-        handlers=[
-            logging.FileHandler("tui_debug.log", mode="w"),
-        ],
+        handlers=[logging.FileHandler("tui_debug.log", mode="w")],
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
-    app = ImpactScanTUI()
+    app = UltraModernTUI()
     app.run()
 
+
 if __name__ == "__main__":
-    run_tui()
+    run_ultra_modern_tui()

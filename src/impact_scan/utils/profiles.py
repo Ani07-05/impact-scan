@@ -1,14 +1,17 @@
 """
 Scan profiles for different use cases to simplify CLI usage.
 """
+
 from dataclasses import dataclass
 from typing import Optional
+
 from impact_scan.utils import schema
 
 
 @dataclass
 class ScanProfile:
     """Defines a scan configuration profile."""
+
     name: str
     description: str
     min_severity: schema.Severity
@@ -43,10 +46,9 @@ SCAN_PROFILES = {
         stackoverflow_scrape_delay=4.0,
         stackoverflow_include_comments=False,
     ),
-    
     "standard": ScanProfile(
         name="standard",
-        description="Balanced scan with moderate depth and AI assistance",
+        description="Balanced scan with AI fixes + Stack Overflow community solutions",
         min_severity=schema.Severity.MEDIUM,
         enable_ai_fixes=True,
         enable_web_search=False,
@@ -55,15 +57,14 @@ SCAN_PROFILES = {
         web_search_batch_size=10,
         web_search_delay=2.0,
         prioritize_high_severity=True,
-        enable_stackoverflow_scraper=False,  # API is now primary, scraper only as fallback
+        enable_stackoverflow_scraper=True,  # Community-validated solutions for AI skeptics
         stackoverflow_max_answers=3,
         stackoverflow_scrape_delay=4.0,
         stackoverflow_include_comments=True,
     ),
-    
     "comprehensive": ScanProfile(
         name="comprehensive",
-        description="Thorough scan with full AI analysis and web research",
+        description="Complete scan: AI + Stack Overflow + Web research for maximum context",
         min_severity=schema.Severity.LOW,
         enable_ai_fixes=True,
         enable_web_search=True,
@@ -72,12 +73,11 @@ SCAN_PROFILES = {
         web_search_batch_size=20,
         web_search_delay=1.5,
         prioritize_high_severity=True,
-        enable_stackoverflow_scraper=False,  # API is now primary, scraper only as fallback
+        enable_stackoverflow_scraper=True,  # More community solutions for comprehensive analysis
         stackoverflow_max_answers=5,
         stackoverflow_scrape_delay=3.5,
         stackoverflow_include_comments=True,
     ),
-    
     "ci": ScanProfile(
         name="ci",
         description="Fast CI/CD pipeline scan focusing on critical issues",
@@ -101,42 +101,51 @@ def get_profile(profile_name: str) -> ScanProfile:
     """Get a scan profile by name."""
     if profile_name not in SCAN_PROFILES:
         available = ", ".join(SCAN_PROFILES.keys())
-        raise ValueError(f"Unknown profile '{profile_name}'. Available profiles: {available}")
+        raise ValueError(
+            f"Unknown profile '{profile_name}'. Available profiles: {available}"
+        )
     return SCAN_PROFILES[profile_name]
 
 
 def auto_detect_ai_provider(api_keys: schema.APIKeys) -> Optional[schema.AIProvider]:
     """Auto-detect the best available AI provider from API keys."""
-    # Priority order: Gemini (fastest/cheapest) -> OpenAI -> Anthropic
+    # Priority order: Groq (fastest/cheapest) -> Gemini -> OpenAI -> Anthropic
     # Check for valid API keys (not test/dummy values)
-    if api_keys.gemini and api_keys.gemini not in ('test', 'dummy', 'placeholder'):
+    if (
+        hasattr(api_keys, "groq")
+        and api_keys.groq
+        and api_keys.groq not in ("test", "dummy", "placeholder")
+    ):
+        return schema.AIProvider.GROQ
+    elif api_keys.gemini and api_keys.gemini not in ("test", "dummy", "placeholder"):
         return schema.AIProvider.GEMINI
-    elif api_keys.openai and api_keys.openai not in ('test', 'dummy', 'placeholder'):
+    elif api_keys.openai and api_keys.openai not in ("test", "dummy", "placeholder"):
         return schema.AIProvider.OPENAI
-    elif api_keys.anthropic and api_keys.anthropic not in ('test', 'dummy', 'placeholder'):
+    elif api_keys.anthropic and api_keys.anthropic not in (
+        "test",
+        "dummy",
+        "placeholder",
+    ):
         return schema.AIProvider.ANTHROPIC
-    
+
     return None
 
 
 def create_config_from_profile(
-    root_path, 
-    profile: ScanProfile, 
-    api_keys: schema.APIKeys,
-    overrides: dict = None
+    root_path, profile: ScanProfile, api_keys: schema.APIKeys, overrides: dict = None
 ) -> schema.ScanConfig:
     """Create a ScanConfig from a profile with optional overrides."""
-    
+
     # Auto-detect AI provider if not specified
     ai_provider = profile.ai_provider
     enable_ai_fixes = profile.enable_ai_fixes
-    
+
     if profile.enable_ai_fixes and ai_provider is None:
         ai_provider = auto_detect_ai_provider(api_keys)
         # If no valid AI provider detected, disable AI features
         if ai_provider is None:
             enable_ai_fixes = False
-    
+
     config_dict = {
         "root_path": root_path,
         "min_severity": profile.min_severity,
@@ -153,9 +162,9 @@ def create_config_from_profile(
         "stackoverflow_scrape_delay": profile.stackoverflow_scrape_delay,
         "stackoverflow_include_comments": profile.stackoverflow_include_comments,
     }
-    
+
     # Apply any overrides
     if overrides:
         config_dict.update(overrides)
-    
+
     return schema.ScanConfig(**config_dict)

@@ -1,6 +1,7 @@
-from pathlib import Path
-from typing import Iterator, Set, List
 import os
+from pathlib import Path
+from typing import Iterator, List, Set
+
 import pathspec
 
 # Define common code file extensions for discoverability
@@ -14,9 +15,7 @@ PYTHON_CONFIG_FILES = {"requirements.txt", "pyproject.toml", "setup.py"}
 NODE_CONFIG_FILES = {"package.json", "pnpm-lock.yaml", "yarn.lock", "package-lock.json"}
 
 
-def discover_files(
-    root_path: Path, extensions: Set[str]
-) -> Iterator[Path]:
+def discover_files(root_path: Path, extensions: Set[str]) -> Iterator[Path]:
     """
     Discovers files with specified extensions, respecting .gitignore rules.
 
@@ -78,9 +77,7 @@ def read_file_content(file_path: Path) -> str:
         raise e
 
 
-def find_project_configs(
-    root_path: Path, config_filenames: Set[str]
-) -> List[Path]:
+def find_project_configs(root_path: Path, config_filenames: Set[str]) -> List[Path]:
     """
     Finds specific configuration files in the project root directory.
 

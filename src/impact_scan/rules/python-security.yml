@@ -1,0 +1,47 @@
+rules:
+  - id: python-sql-injection-fstring
+    patterns:
+      - pattern: |
+          $QUERY = f"..."
+          ...
+          $CURSOR.execute($QUERY)
+    message: |
+      SQL injection vulnerability detected: f-string formatting used in SQL query.
+      User input could be injected to manipulate the query.
+      Fix: Use parameterized queries instead: cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+      owasp: "A1: Injection"
+      confidence: HIGH
+      
+  - id: python-sql-injection-concat
+    pattern-either:
+      - pattern: $CURSOR.execute("..." + $VAR + "...")
+      - pattern: $CURSOR.execute("...".format($VAR))
+      - pattern: $CURSOR.execute("..." % $VAR)
+    message: |
+      SQL injection vulnerability: string concatenation or formatting in SQL query.
+      Fix: Use parameterized queries instead of string concatenation.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+      owasp: "A1: Injection"
+      confidence: HIGH
+      
+  - id: python-hardcoded-secret
+    pattern-either:
+      - pattern: $VAR = "sk-..."
+      - pattern: $VAR = "key-..."
+      - pattern: PASSWORD = "..."
+      - pattern: API_KEY = "..."
+    message: Hardcoded secret or API key detected
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: security
+      cwe: "CWE-798: Use of Hard-coded Credentials"

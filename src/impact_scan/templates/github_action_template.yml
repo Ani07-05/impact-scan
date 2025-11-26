@@ -1,0 +1,124 @@
+name: Impact-Scan Security Analysis
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run weekly security scans every Sunday at midnight
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    inputs:
+      scan_profile:
+        description: 'Scan profile to use'
+        required: false
+        default: 'standard'
+        type: choice
+        options:
+          - quick
+          - standard
+          - comprehensive
+
+permissions:
+  contents: read
+  security-events: write  # Required for uploading SARIF to Security tab
+  pull-requests: write    # Required for PR comments
+
+jobs:
+  security-scan:
+    name: Run Impact-Scan Security Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install Impact-Scan
+        run: |
+          python -m pip install --upgrade pip
+          pip install impact-scan
+      
+      - name: Run Security Scan
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          impact-scan scan . \
+            --profile ${{ github.event.inputs.scan_profile || 'standard' }} \
+            --output-format sarif,markdown,html \
+            --output impact-scan-results \
+            --min-severity medium \
+            --ai groq
+      
+      - name: Upload SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: impact-scan-results.sarif
+          category: impact-scan
+      
+      - name: Upload HTML Report as Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: impact-scan-html-report
+          path: impact-scan-results.html
+          retention-days: 90
+      
+      - name: Upload Markdown Report as Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: impact-scan-markdown-report
+          path: impact-scan-results.md
+          retention-days: 90
+      
+      - name: Comment PR with Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            // Read markdown report
+            let markdownReport = '';
+            try {
+              markdownReport = fs.readFileSync('impact-scan-results.md', 'utf8');
+            } catch (error) {
+              console.log('Markdown report not found, skipping PR comment');
+              return;
+            }
+            
+            // Truncate if too long (GitHub has 65536 char limit)
+            if (markdownReport.length > 60000) {
+              markdownReport = markdownReport.substring(0, 60000) + '\n\n...(truncated)\n\n[View full report in artifacts]';
+            }
+            
+            // Post comment
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: markdownReport
+            });
+      
+      - name: Check for Critical Vulnerabilities
+        run: |
+          # Parse SARIF for critical/high vulnerabilities
+          CRITICAL_COUNT=$(cat impact-scan-results.sarif | jq '[.runs[0].results[] | select(.level == "error")] | length')
+          echo "Found $CRITICAL_COUNT critical/high vulnerabilities"
+          
+          if [ "$CRITICAL_COUNT" -gt 0 ]; then
+            echo "::error::Found $CRITICAL_COUNT critical/high severity vulnerabilities!"
+            echo "::notice::Review the Security tab for details"
+            exit 1
+          fi
+          
+          echo "::notice::No critical vulnerabilities found! ✅"

@@ -4,36 +4,33 @@ Modern Web-based UI for Impact Scan
 A fully functional web interface using Flask with real-time updates.
 """
 
-import os
 import json
-import time
-import asyncio
+import os
+import subprocess
 import threading
+import time
 import webbrowser
 from pathlib import Path
-from typing import Dict, List, Optional
 
-from flask import Flask, render_template_string, request, jsonify, session, send_file
-import subprocess
+from flask import Flask, jsonify, render_template_string, request, send_file
 
-from impact_scan.utils import schema
-from impact_scan.core import entrypoint, aggregator, fix_ai, web_search
+from impact_scan.core import aggregator, entrypoint
 from impact_scan.core.html_report import save_report
-from impact_scan.utils import profiles
+from impact_scan.utils import schema
 
 # Global scan state
 scan_state = {
-    'running': False,
-    'progress': 0,
-    'status': 'Ready',
-    'logs': [],
-    'results': None
+    "running": False,
+    "progress": 0,
+    "status": "Ready",
+    "logs": [],
+    "results": None,
 }
 
 app = Flask(__name__)
-app.secret_key = 'impact-scan-secret-key'
+app.secret_key = "impact-scan-secret-key"
 
-HTML_TEMPLATE = '''
+HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -808,221 +805,264 @@ HTML_TEMPLATE = '''
     </script>
 </body>
 </html>
-'''
+"""
 
-@app.route('/')
+
+@app.route("/")
 def index():
     """Main web interface."""
     current_path = str(Path.cwd())
     return render_template_string(HTML_TEMPLATE, current_path=current_path)
 
-@app.route('/api/start_scan', methods=['POST'])
+
+@app.route("/api/start_scan", methods=["POST"])
 def start_scan():
     """Start a security scan."""
     global scan_state
-    
-    if scan_state['running']:
-        return jsonify({'success': False, 'error': 'Scan already running'})
-    
+
+    if scan_state["running"]:
+        return jsonify({"success": False, "error": "Scan already running"})
+
     try:
         config_data = request.get_json()
-        
+
         # Create scan configuration
         config = schema.ScanConfig(
-            target_path=Path(config_data['target_path']),
-            output_format='console',
-            ai_provider=config_data['ai_provider'] if config_data['ai_provider'] != 'none' else None,
-            enable_ai_fixes=config_data['enable_ai_fixes'],
-            enable_web_search=config_data['enable_web_search'],
-            profile=config_data['profile']
+            target_path=Path(config_data["target_path"]),
+            output_format="console",
+            ai_provider=config_data["ai_provider"]
+            if config_data["ai_provider"] != "none"
+            else None,
+            enable_ai_fixes=config_data["enable_ai_fixes"],
+            enable_web_search=config_data["enable_web_search"],
+            profile=config_data["profile"],
         )
-        
+
         # Reset scan state
         scan_state = {
-            'running': True,
-            'progress': 0,
-            'status': 'Starting scan...',
-            'logs': [],
-            'results': None
+            "running": True,
+            "progress": 0,
+            "status": "Starting scan...",
+            "logs": [],
+            "results": None,
         }
-        
+
         # Start scan in background thread
         thread = threading.Thread(target=run_scan_background, args=(config,))
         thread.daemon = True
         thread.start()
-        
-        return jsonify({'success': True})
-        
+
+        return jsonify({"success": True})
+
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({"success": False, "error": str(e)})
+
 
 def run_scan_background(config):
     """Run scan in background thread."""
     global scan_state
-    
-    try:
-        scan_state['logs'].append('🚀 [SCAN] Starting comprehensive security analysis...')
-        scan_state['progress'] = 10
-        
-        # Run the actual scan
-        scan_state['logs'].append('🎯 [TARGET] Analyzing target directory...')
-        scan_state['progress'] = 20
-        
-        result = entrypoint.run_scan(config)
-        
-        scan_state['logs'].append('🔍 [ANALYSIS] Running static security analysis...')
-        scan_state['progress'] = 50
-        
-        scan_state['logs'].append('📦 [DEPS] Checking dependencies for vulnerabilities...')
-        scan_state['progress'] = 70
-        
-        if config.enable_web_search:
-            scan_state['logs'].append('🌐 [WEB-SEARCH] Gathering threat intelligence...')
-            scan_state['progress'] = 85
-        
-        if config.enable_ai_fixes:
-            scan_state['logs'].append('🤖 [AI-FIXES] Generating intelligent remediation...')
-            scan_state['progress'] = 95
-        
-        scan_state['logs'].append('✅ [SUCCESS] Scan completed successfully!')
-        scan_state['progress'] = 100
-        scan_state['status'] = 'Scan completed'
-        scan_state['results'] = result
-        
-    except Exception as e:
-        scan_state['logs'].append(f'❌ [ERROR] Scan failed: {str(e)}')
-        scan_state['status'] = 'Scan failed'
-    finally:
-        scan_state['running'] = False
 
-@app.route('/api/scan_status')
+    try:
+        scan_state["logs"].append(
+            "🚀 [SCAN] Starting comprehensive security analysis..."
+        )
+        scan_state["progress"] = 10
+
+        # Run the actual scan
+        scan_state["logs"].append("🎯 [TARGET] Analyzing target directory...")
+        scan_state["progress"] = 20
+
+        result = entrypoint.run_scan(config)
+
+        scan_state["logs"].append("🔍 [ANALYSIS] Running static security analysis...")
+        scan_state["progress"] = 50
+
+        scan_state["logs"].append(
+            "📦 [DEPS] Checking dependencies for vulnerabilities..."
+        )
+        scan_state["progress"] = 70
+
+        if config.enable_web_search:
+            scan_state["logs"].append(
+                "🌐 [WEB-SEARCH] Gathering threat intelligence..."
+            )
+            scan_state["progress"] = 85
+
+        if config.enable_ai_fixes:
+            scan_state["logs"].append(
+                "🤖 [AI-FIXES] Generating intelligent remediation..."
+            )
+            scan_state["progress"] = 95
+
+        scan_state["logs"].append("✅ [SUCCESS] Scan completed successfully!")
+        scan_state["progress"] = 100
+        scan_state["status"] = "Scan completed"
+        scan_state["results"] = result
+
+    except Exception as e:
+        scan_state["logs"].append(f"❌ [ERROR] Scan failed: {str(e)}")
+        scan_state["status"] = "Scan failed"
+    finally:
+        scan_state["running"] = False
+
+
+@app.route("/api/scan_status")
 def scan_status():
     """Get current scan status."""
     return jsonify(scan_state)
 
-@app.route('/api/export/html', methods=['POST'])
+
+@app.route("/api/export/html", methods=["POST"])
 def export_html():
     """Export results as HTML."""
     global scan_state
-    
-    if not scan_state['results']:
-        return jsonify({'success': False, 'error': 'No scan results available'})
-    
+
+    if not scan_state["results"]:
+        return jsonify({"success": False, "error": "No scan results available"})
+
     try:
         timestamp = int(time.time())
-        filename = f'impact_scan_report_{timestamp}.html'
+        filename = f"impact_scan_report_{timestamp}.html"
         filepath = Path.cwd() / filename
-        
-        save_report(scan_state['results'], str(filepath))
-        
-        return jsonify({
-            'success': True,
-            'filename': filename,
-            'url': f'file://{filepath.absolute()}'
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
 
-@app.route('/api/export/sarif', methods=['POST'])
+        save_report(scan_state["results"], str(filepath))
+
+        return jsonify(
+            {
+                "success": True,
+                "filename": filename,
+                "url": f"file://{filepath.absolute()}",
+            }
+        )
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/export/sarif", methods=["POST"])
 def export_sarif():
     """Export results as SARIF."""
     global scan_state
-    
-    if not scan_state['results']:
-        return jsonify({'success': False, 'error': 'No scan results available'})
-    
+
+    if not scan_state["results"]:
+        return jsonify({"success": False, "error": "No scan results available"})
+
     try:
         timestamp = int(time.time())
-        filename = f'impact_scan_sarif_{timestamp}.json'
+        filename = f"impact_scan_sarif_{timestamp}.json"
         filepath = Path.cwd() / filename
-        
-        # Generate SARIF using aggregator
-        sarif_result = aggregator.to_sarif([scan_state['results']])
-        
-        with open(filepath, 'w') as f:
-            json.dump(sarif_result, f, indent=2)
-        
-        return jsonify({
-            'success': True,
-            'filename': filename,
-            'download_url': f'/download/{filename}'
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
 
-@app.route('/api/export/pdf', methods=['POST'])
+        # Generate SARIF using aggregator
+        sarif_result = aggregator.to_sarif([scan_state["results"]])
+
+        with open(filepath, "w") as f:
+            json.dump(sarif_result, f, indent=2)
+
+        return jsonify(
+            {
+                "success": True,
+                "filename": filename,
+                "download_url": f"/download/{filename}",
+            }
+        )
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/export/pdf", methods=["POST"])
 def export_pdf():
     """Export results as PDF."""
     global scan_state
-    
-    if not scan_state['results']:
-        return jsonify({'success': False, 'error': 'No scan results available'})
-    
+
+    if not scan_state["results"]:
+        return jsonify({"success": False, "error": "No scan results available"})
+
     try:
         timestamp = int(time.time())
-        html_filename = f'temp_report_{timestamp}.html'
-        pdf_filename = f'impact_scan_report_{timestamp}.pdf'
-        
+        html_filename = f"temp_report_{timestamp}.html"
+        pdf_filename = f"impact_scan_report_{timestamp}.pdf"
+
         html_filepath = Path.cwd() / html_filename
         pdf_filepath = Path.cwd() / pdf_filename
-        
+
         # Generate HTML first
-        save_report(scan_state['results'], str(html_filepath))
-        
+        save_report(scan_state["results"], str(html_filepath))
+
         # Try to generate PDF using wkhtmltopdf
         try:
-            subprocess.run([
-                'wkhtmltopdf', '--page-size', 'A4', '--orientation', 'Portrait',
-                '--margin-top', '0.75in', '--margin-right', '0.75in',
-                '--margin-bottom', '0.75in', '--margin-left', '0.75in',
-                str(html_filepath), str(pdf_filepath)
-            ], check=True, capture_output=True)
-            
+            subprocess.run(
+                [
+                    "wkhtmltopdf",
+                    "--page-size",
+                    "A4",
+                    "--orientation",
+                    "Portrait",
+                    "--margin-top",
+                    "0.75in",
+                    "--margin-right",
+                    "0.75in",
+                    "--margin-bottom",
+                    "0.75in",
+                    "--margin-left",
+                    "0.75in",
+                    str(html_filepath),
+                    str(pdf_filepath),
+                ],
+                check=True,
+                capture_output=True,
+            )
+
             # Clean up temp HTML
             html_filepath.unlink()
-            
-            return jsonify({
-                'success': True,
-                'filename': pdf_filename,
-                'download_url': f'/download/{pdf_filename}'
-            })
+
+            return jsonify(
+                {
+                    "success": True,
+                    "filename": pdf_filename,
+                    "download_url": f"/download/{pdf_filename}",
+                }
+            )
         except (FileNotFoundError, subprocess.CalledProcessError):
             # Fallback: just return HTML if PDF generation fails
-            html_filepath.rename(pdf_filepath.with_suffix('.html'))
-            return jsonify({
-                'success': True,
-                'filename': pdf_filename.replace('.pdf', '.html'),
-                'download_url': f'/download/{pdf_filename.replace(".pdf", ".html")}'
-            })
-            
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+            html_filepath.rename(pdf_filepath.with_suffix(".html"))
+            return jsonify(
+                {
+                    "success": True,
+                    "filename": pdf_filename.replace(".pdf", ".html"),
+                    "download_url": f"/download/{pdf_filename.replace('.pdf', '.html')}",
+                }
+            )
 
-@app.route('/api/api_keys', methods=['POST'])
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/api_keys", methods=["POST"])
 def update_api_keys():
     """Update API keys."""
     try:
         keys = request.get_json()
-        
-        if keys.get('openai'):
-            os.environ['OPENAI_API_KEY'] = keys['openai']
-        if keys.get('anthropic'):
-            os.environ['ANTHROPIC_API_KEY'] = keys['anthropic']
-        if keys.get('gemini'):
-            os.environ['GOOGLE_API_KEY'] = keys['gemini']
-        
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
 
-@app.route('/download/<filename>')
+        if keys.get("openai"):
+            os.environ["OPENAI_API_KEY"] = keys["openai"]
+        if keys.get("anthropic"):
+            os.environ["ANTHROPIC_API_KEY"] = keys["anthropic"]
+        if keys.get("gemini"):
+            os.environ["GOOGLE_API_KEY"] = keys["gemini"]
+
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/download/<filename>")
 def download_file(filename):
     """Download exported file."""
     filepath = Path.cwd() / filename
     if filepath.exists():
         return send_file(str(filepath), as_attachment=True)
     else:
-        return jsonify({'error': 'File not found'}), 404
+        return jsonify({"error": "File not found"}), 404
+
 
 def run_web_ui(port=5000, auto_open=True):
     """Launch the web UI."""
@@ -1030,13 +1070,14 @@ def run_web_ui(port=5000, auto_open=True):
         # Open browser after a short delay
         def open_browser():
             time.sleep(1)
-            webbrowser.open(f'http://localhost:{port}')
-        
+            webbrowser.open(f"http://localhost:{port}")
+
         thread = threading.Thread(target=open_browser)
         thread.daemon = True
         thread.start()
-    
-    app.run(host='127.0.0.1', port=port, debug=False, use_reloader=False)
 
-if __name__ == '__main__':
+    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
+
+
+if __name__ == "__main__":
     run_web_ui()

@@ -7,6 +7,8 @@ import sys
 import asyncio
 from pathlib import Path
 
+import pytest
+
 # Add src directory to Python path
 sys.path.insert(0, str(Path(__file__).parent / 'src'))
 
@@ -34,20 +36,21 @@ def create_real_cve_vulnerability() -> Finding:
         metadata={}
     )
 
+@pytest.mark.anyio
 async def test_real_cve_research():
     """Test the web intelligence system with a real CVE."""
-    print("🚀 Testing Real CVE Research")
-    print("🎯 CVE-2023-43804 (urllib3 vulnerability)")
+    print("Testing Real CVE Research")
+    print("CVE-2023-43804 (urllib3 vulnerability)")
     print("=" * 60)
     
     # Create test vulnerability with real CVE
     vuln = create_real_cve_vulnerability()
     
-    print("📋 CVE DETAILS")
+    print("CVE DETAILS")
     print("-" * 20)
-    print(f"📄 CVE: {vuln.vuln_id}")
-    print(f"⚠️  Severity: {vuln.severity.value.upper()}")
-    print(f"📝 Issue: {vuln.description}")
+    print(f"CVE: {vuln.vuln_id}")
+    print(f"Severity: {vuln.severity.value.upper()}")
+    print(f"Issue: {vuln.description}")
     print()
     
     # Test the modern web intelligence agent
@@ -61,7 +64,7 @@ async def test_real_cve_research():
         min_severity=Severity.LOW
     )
     
-    print("🔍 RUNNING NVD API + GITHUB INTELLIGENCE...")
+    print("RUNNING NVD API + GITHUB INTELLIGENCE...")
     print("-" * 45)
     
     # Initialize the agent
@@ -72,21 +75,21 @@ async def test_real_cve_research():
         # Research the real CVE
         intelligence = await agent.research_vulnerability(vuln)
         
-        print("📊 COMPREHENSIVE INTELLIGENCE RESULTS:")
+        print("COMPREHENSIVE INTELLIGENCE RESULTS:")
         print("-" * 40)
-        print(f"🎯 Confidence Score: {intelligence.confidence_score:.1%}")
-        print(f"📈 Severity Score: {intelligence.severity_score:.2f}")
-        print(f"⚡ Exploitability: {intelligence.exploitability_score:.2f}")
-        print(f"🔗 Sources Found: {len(intelligence.sources)}")
-        print(f"📋 Advisories: {len(intelligence.advisories)}")
-        print(f"🔗 Related CVEs: {len(intelligence.related_cves)}")
-        print(f"💥 Exploits Found: {len(intelligence.exploits)}")
-        print(f"🛡️  Patches Found: {len(intelligence.patches)}")
-        print(f"📚 Citations: {len(intelligence.citations)}")
+        print(f"Confidence Score: {intelligence.confidence_score:.1%}")
+        print(f"Severity Score: {intelligence.severity_score:.2f}")
+        print(f"Exploitability: {intelligence.exploitability_score:.2f}")
+        print(f"Sources Found: {len(intelligence.sources)}")
+        print(f"Advisories: {len(intelligence.advisories)}")
+        print(f"Related CVEs: {len(intelligence.related_cves)}")
+        print(f"Exploits Found: {len(intelligence.exploits)}")
+        print(f"Patches Found: {len(intelligence.patches)}")
+        print(f"Citations: {len(intelligence.citations)}")
         print()
         
         if intelligence.advisories:
-            print("📋 SECURITY ADVISORIES:")
+            print("SECURITY ADVISORIES:")
             print("-" * 25)
             for i, advisory in enumerate(intelligence.advisories[:3], 1):
                 source = advisory.get('source', 'Unknown')
@@ -95,14 +98,14 @@ async def test_real_cve_research():
             print()
             
         if intelligence.related_cves:
-            print("🔗 RELATED CVEs:")
+            print("RELATED CVEs:")
             print("-" * 15)
             for cve in intelligence.related_cves[:5]:
                 print(f"• {cve}")
             print()
             
         if intelligence.patches:
-            print("🛡️  PATCHES FOUND:")
+            print("PATCHES FOUND:")
             print("-" * 17)
             for i, patch in enumerate(intelligence.patches[:3], 1):
                 source = patch.get('source', 'Unknown')
@@ -113,26 +116,26 @@ async def test_real_cve_research():
             print()
             
         if intelligence.sources:
-            print("🌐 INTELLIGENCE SOURCES:")
+            print("INTELLIGENCE SOURCES:")
             print("-" * 25)
             for i, source in enumerate(intelligence.sources, 1):
                 print(f"{i}. {source}")
             print()
             
-        print("🎯 NVD API + GITHUB INTELLIGENCE VERDICT:")
+        print("NVD API + GITHUB INTELLIGENCE VERDICT:")
         print("-" * 40)
         if intelligence.severity_score > 5.0:
-            print("⚠️  HIGH RISK: This CVE has a high severity score")
+            print("HIGH RISK: This CVE has a high severity score")
         elif intelligence.advisories:
-            print("✅ COMPREHENSIVE DATA: Successfully retrieved official vulnerability data")
+            print("COMPREHENSIVE DATA: Successfully retrieved official vulnerability data")
         else:
-            print("⚠️  LIMITED DATA: Could not retrieve comprehensive CVE data")
+            print("LIMITED DATA: Could not retrieve comprehensive CVE data")
             
-        print(f"✅ NVD API integration: {'WORKING' if any('nvd.nist.gov' in src for src in intelligence.sources) else 'NOT TESTED'}")
-        print(f"✅ GitHub API integration: {'WORKING' if any(adv.get('source') == 'GitHub Security Advisory' for adv in intelligence.advisories) else 'LIMITED (rate limited)'}")
+        print(f"NVD API integration: {'WORKING' if any('nvd.nist.gov' in src for src in intelligence.sources) else 'NOT TESTED'}")
+        print(f"GitHub API integration: {'WORKING' if any(adv.get('source') == 'GitHub Security Advisory' for adv in intelligence.advisories) else 'LIMITED (rate limited)'}")
         
     except Exception as e:
-        print(f"❌ Error during CVE research: {e}")
+        print(f"Error during CVE research: {e}")
         import traceback
         traceback.print_exc()
         
@@ -140,7 +143,7 @@ async def test_real_cve_research():
         await agent.cleanup()
         
     print()
-    print("🎊 REAL CVE TEST COMPLETE!")
+    print("REAL CVE TEST COMPLETE!")
     print("=" * 60)
 
 if __name__ == "__main__":

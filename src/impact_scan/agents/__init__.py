@@ -4,21 +4,21 @@ Revolutionary AI-powered security testing with specialized agents.
 """
 
 from .base import Agent, AgentResult, AgentStatus
+from .compliance import ComplianceAgent
+from .exploit import ExploitAgent
+from .fix import FixAgent
 from .orchestrator import AgentOrchestrator
 from .recon import ReconAgent
 from .vuln import VulnAgent
-from .exploit import ExploitAgent
-from .fix import FixAgent
-from .compliance import ComplianceAgent
 
 __all__ = [
     "Agent",
-    "AgentResult", 
+    "AgentResult",
     "AgentStatus",
     "AgentOrchestrator",
     "ReconAgent",
-    "VulnAgent", 
+    "VulnAgent",
     "ExploitAgent",
     "FixAgent",
-    "ComplianceAgent"
+    "ComplianceAgent",
 ]

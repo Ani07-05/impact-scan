@@ -1,13 +1,8 @@
 import abc
 import logging
-from pathlib import Path
-from typing import List, Dict, Type
+from typing import Dict, List, Optional, Type
 
-import openai
-import anthropic
-import google.generativeai as genai
-
-from impact_scan.utils import schema
+from ..utils import schema
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -15,11 +10,13 @@ logger = logging.getLogger(__name__)
 
 class AIFixError(Exception):
     """Custom exception for AI fix generation failures."""
+
     pass
 
 
 class AIFixProvider(abc.ABC):
     """Abstract base class for AI fix suggestion providers."""
+
     _PROMPT_TEMPLATE = """
 You are an expert security engineer. Your task is to fix a vulnerability in the following code snippet.
 Provide a fix in the form of a standard unified diff format ONLY.
@@ -36,17 +33,24 @@ Respond with the unified diff to fix the vulnerability.
 """
 
     @abc.abstractmethod
-    def generate_fix(self, finding: schema.Finding) -> str:
-        """Generates a fix suggestion for a given vulnerability finding."""
+    @abc.abstractmethod
+    def generate_content(self, prompt: str) -> str:
+        """Generates content for a given prompt."""
         raise NotImplementedError
 
 
 class OpenAIFixProvider(AIFixProvider):
     def __init__(self, api_key: str):
+        import openai
+
         self.client = openai.OpenAI(api_key=api_key)
+        self.openai_module = openai
 
     def generate_fix(self, finding: schema.Finding) -> str:
         prompt = self._PROMPT_TEMPLATE.format(**finding.model_dump())
+        return self.generate_content(prompt)
+
+    def generate_content(self, prompt: str) -> str:
         try:
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -54,16 +58,22 @@ class OpenAIFixProvider(AIFixProvider):
                 temperature=0.0,
             )
             return response.choices[0].message.content.strip()
-        except openai.APIError as e:
+        except self.openai_module.APIError as e:
             raise AIFixError(f"OpenAI API error: {e}") from e
 
 
 class AnthropicFixProvider(AIFixProvider):
     def __init__(self, api_key: str):
+        import anthropic
+
         self.client = anthropic.Anthropic(api_key=api_key)
+        self.anthropic_module = anthropic
 
     def generate_fix(self, finding: schema.Finding) -> str:
         prompt = self._PROMPT_TEMPLATE.format(**finding.model_dump())
+        return self.generate_content(prompt)
+
+    def generate_content(self, prompt: str) -> str:
         try:
             response = self.client.messages.create(
                 model="claude-3-haiku-20240307",
@@ -73,53 +83,118 @@ class AnthropicFixProvider(AIFixProvider):
                 temperature=0.0,
             )
             return response.content[0].text.strip()
-        except anthropic.APIError as e:
+        except self.anthropic_module.APIError as e:
             raise AIFixError(f"Anthropic API error: {e}") from e
 
 
 class GeminiFixProvider(AIFixProvider):
     def __init__(self, api_key: str):
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        from google import genai
+
+        self.client = genai.Client(api_key=api_key)
 
     def generate_fix(self, finding: schema.Finding) -> str:
         prompt = self._PROMPT_TEMPLATE.format(**finding.model_dump())
+        return self.generate_content(prompt)
+
+    def generate_content(self, prompt: str) -> str:
         try:
-            response = self.model.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model="gemini-2.5-flash", contents=prompt
+            )
             return response.text.strip()
-        except RuntimeError as e:
-            if "no current event loop" in str(e).lower() or "asyncio" in str(e).lower():
-                # Handle asyncio issues by creating a new event loop
-                import asyncio
-                try:
-                    # Try to get current loop, create one if none exists
-                    asyncio.get_event_loop()
-                except RuntimeError:
-                    # Create and set a new event loop for this thread
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                
-                # Retry the API call
-                response = self.model.generate_content(prompt)
-                return response.text.strip()
-            else:
-                raise AIFixError(f"Gemini API error: {e}") from e
         except Exception as e:
             raise AIFixError(f"Gemini API error: {e}") from e
 
 
+class GroqFixProvider(AIFixProvider):
+    def __init__(self, api_key: str):
+        from groq import Groq
+
+        self.client = Groq(api_key=api_key)
+
+    def generate_fix(self, finding: schema.Finding) -> str:
+        prompt = self._PROMPT_TEMPLATE.format(**finding.model_dump())
+        return self.generate_content(prompt)
+
+    def generate_content(self, prompt: str) -> str:
+        try:
+            response = self.client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=2048,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            raise AIFixError(f"Groq API error: {e}") from e
 
 
 _PROVIDER_MAP: Dict[str, Type[AIFixProvider]] = {
     "openai": OpenAIFixProvider,
     "anthropic": AnthropicFixProvider,
     "gemini": GeminiFixProvider,
+    "groq": GroqFixProvider,
 }
 
-def get_ai_fix_provider(api_keys: schema.APIKeys) -> AIFixProvider:
+
+def auto_detect_provider(api_keys: schema.APIKeys) -> Optional[AIFixProvider]:
+    """
+    Auto-detect the first available AI provider based on API keys.
+
+    Priority order: groq -> gemini -> openai -> anthropic
+
+    Args:
+        api_keys: API keys for various providers
+
+    Returns:
+        Instance of AIFixProvider or None if no API key found
+    """
+    # Priority order for auto-detection
+    priority_order = ["groq", "gemini", "openai", "anthropic"]
+
+    for provider_name in priority_order:
+        api_key = getattr(api_keys, provider_name, None)
+        if api_key:
+            provider_class = _PROVIDER_MAP.get(provider_name)
+            if provider_class:
+                logger.info(f"Auto-detected AI provider: {provider_name}")
+                return provider_class(api_key)
+
+    return None
+
+
+def get_ai_fix_provider(
+    api_keys: schema.APIKeys, provider_override: Optional[str] = None
+) -> AIFixProvider:
     """
     Factory function to get the first available AI fix provider.
+
+    Args:
+        api_keys: API keys for various providers
+        provider_override: Optional provider name to use (groq, gemini, openai, anthropic)
+
+    Returns:
+        Instance of AIFixProvider
+
+    Raises:
+        AIFixError: If no API key is found or provider override is invalid
     """
+    # If provider override specified, try that first
+    if provider_override:
+        api_key = getattr(api_keys, provider_override, None)
+        if not api_key:
+            raise AIFixError(
+                f"Provider '{provider_override}' specified but no API key found"
+            )
+
+        provider_class = _PROVIDER_MAP.get(provider_override)
+        if not provider_class:
+            raise AIFixError(f"Unknown provider: '{provider_override}'")
+
+        return provider_class(api_key)
+
+    # Otherwise, auto-detect first available provider
     for provider_name, api_key in api_keys.model_dump().items():
         if api_key:
             provider_class = _PROVIDER_MAP.get(provider_name)
@@ -150,3 +225,27 @@ def generate_fixes(findings: List[schema.Finding], config: schema.ScanConfig) ->
             logger.debug(f"Generated fix for {finding.vuln_id}")
         except AIFixError as e:
             logger.warning(f"Could not generate fix for {finding.vuln_id}: {e}")
+
+
+def get_ai_response(
+    prompt: str, config: schema.ScanConfig, provider: str = None
+) -> str:
+    """
+    Get a response from the AI provider for a given prompt.
+    """
+    try:
+        # If provider is specified, try to use it specifically
+        if provider:
+            api_key = getattr(config.api_keys, provider, None)
+            if api_key:
+                provider_class = _PROVIDER_MAP.get(provider)
+                if provider_class:
+                    fix_provider = provider_class(api_key)
+                    return fix_provider.generate_content(prompt)
+
+        # Fallback to default provider selection
+        fix_provider = get_ai_fix_provider(config.api_keys)
+        return fix_provider.generate_content(prompt)
+    except Exception as e:
+        logger.error(f"Error getting AI response: {e}")
+        return ""

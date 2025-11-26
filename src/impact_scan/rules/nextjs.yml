@@ -1,0 +1,28 @@
+rules:
+  - id: react-dangerouslysetinnerhtml
+    patterns:
+      - pattern: |
+          <$TAG ... dangerouslySetInnerHTML={...} ... />
+    message: "Detected dangerouslySetInnerHTML. This allows Cross-Site Scripting (XSS) if the content is not properly sanitized. Use a safer alternative or ensure content is sanitized."
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      cwe: "CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"
+      owasp: "A03:2021 - Injection"
+      references:
+        - "https://react.dev/reference/react-dom/components/common#dangerouslysetinnerhtml"
+
+  - id: nextjs-ssrf-getserversideprops
+    patterns:
+      - pattern-inside: |
+          export async function getServerSideProps(...) { ... }
+      - pattern: |
+          fetch($URL, ...)
+      - pattern: |
+          axios.get($URL, ...)
+    message: "Potential SSRF in getServerSideProps. Fetching a user-controlled URL server-side can lead to Server-Side Request Forgery."
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      cwe: "CWE-918: Server-Side Request Forgery (SSRF)"
+      owasp: "A10:2021 - Server-Side Request Forgery (SSRF)"

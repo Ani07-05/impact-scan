@@ -141,3 +141,24 @@ venv/
 build/
 dist/
 *.egg-info/
+
+# Scan results (prevent clutter)
+*.sarif
+*_scan.json
+*_scan.html
+*_report.*
+test_*.json
+demo_*.json
+
+# Documentation (already in docs/)
+/*_ANALYSIS.md
+/*_SUMMARY.md
+/*_GUIDE.md
+/*_PLAN.md
+/*_IMPLEMENTATION.md
+
+# Exceptions (keep important docs)
+!README.md
+!CLAUDE.md
+!CONTRIBUTING.md
+!LICENSE.md
