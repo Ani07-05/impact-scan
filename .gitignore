@@ -166,3 +166,12 @@ demo_*.json
 # Claude Code configuration
 .claude/
 CLAUDE.md
+
+# Test and example directories
+examples/
+benchmark_results/
+test_autofix/
+hexa/
+*.json
+!pyproject.toml
+!package.json
