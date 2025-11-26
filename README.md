@@ -1,473 +1,374 @@
-# Impact Scan
+# Impact-Scan
 
-**A comprehensive, AI-powered security vulnerability scanner for codebases with intelligent fix suggestions, automated remediation, and professional reporting.**
+A comprehensive security vulnerability scanner for codebases that combines static analysis, dependency vulnerability scanning, and AI-powered fix generation.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 
-## 🌟 Key Features
+## Features
 
-### 🔍 Multi-Layer Security Scanning
-- **Static Analysis**: Powered by Semgrep with 2000+ security rules
-- **Dependency Scanning**: Detect vulnerable packages and libraries
-- **AI-Powered Analysis**: Generate intelligent fix suggestions with 95% accuracy
-- **Web Intelligence**: Contextual vulnerability information from Stack Overflow and security databases
+### Security Scanning
+- **Static Code Analysis**: Powered by Semgrep and Bandit with 40+ custom security rules
+- **Dependency Vulnerability Scanning**: Detect vulnerable packages using OSV database, pip-audit, and Safety
+- **JWT/OAuth Security**: Specialized detection for authentication vulnerabilities (25+ rules)
+- **Multi-Language Support**: Python, JavaScript, TypeScript, Node.js, and more
+- **AI-Powered False Positive Reduction**: Optional AI validation to reduce false positives by up to 91%
 
-### 🤖 Automated Remediation
-- **One-Click Fixes**: Apply AI-generated patches automatically with `--fix`
-- **Safety Guardrails**: Git integration, syntax validation, backup/rollback
-- **Confidence Levels**: Conservative (high confidence) or aggressive (medium+) strategies
-- **Test Integration**: Run your test suite before committing fixes
+### AI-Powered Fix Generation
+- **Multiple AI Providers**: Support for Groq, Gemini, OpenAI, and Anthropic
+- **Intelligent Fix Suggestions**: Context-aware security fixes with code examples
+- **Local LLM Support**: Air-gapped environments supported via llama-cpp-python
 
-### 🚀 CI/CD Integration
-- **GitHub Actions Templates**: One command setup with `init-github-action`
-- **SARIF Support**: Security findings in GitHub Security tab
-- **Automated PRs**: Weekly auto-fix workflows with automatic pull request creation
-- **PR Comments**: Inline vulnerability comments on pull requests
-
-### ⚙️ Flexible Configuration
-- **Ignore Rules**: Suppress false positives by CWE, CVE, rule ID, path, severity
-- **Expiration Dates**: Time-bound ignores for temporary suppression
-- **Multiple Profiles**: Quick, standard, comprehensive, dependency-only
-- **Custom Rules**: Add your own Semgrep rules
-
-### 📊 Professional Reporting
-- **HTML Reports**: Beautiful, interactive reports with charts and metrics
-- **SARIF Format**: Standard format for security tools and GitHub
+### Professional Reporting
+- **HTML Reports**: Interactive reports with dark theme and code highlighting
+- **SARIF 2.1.0 Format**: GitHub Security tab integration
+- **Markdown Reports**: GitHub-friendly documentation
 - **JSON Export**: Machine-readable output for automation
-- **Terminal Output**: Rich console display with colors and formatting
 
----
+### Multiple Interfaces
+- **CLI**: Command-line interface with scan profiles
+- **TUI**: Interactive terminal user interface
+- **Web UI**: Flask-based browser interface
 
-## 🚀 Quick Start
+## Installation
 
-### Installation
+### Quick Start
 
+**Linux/macOS:**
 ```bash
-pip install impact-scan
+chmod +x install.sh
+./install.sh
 ```
 
-### Basic Usage
-
-```bash
-# Run a quick scan
-impact-scan scan .
-
-# Comprehensive scan with AI fixes
-impact-scan scan . --profile comprehensive --ai groq
-
-# Auto-fix vulnerabilities (interactive mode)
-impact-scan scan . --fix
-
-# Generate HTML report
-impact-scan scan . --output-format html --output report.html
+**Windows (PowerShell):**
+```powershell
+.\install.ps1
 ```
 
----
+### Manual Installation
 
-## 📋 Three Powerful Features
-
-### 1. GitHub Actions CI/CD Integration
-
-Generate a complete GitHub Actions workflow in seconds:
-
+**With Poetry (Recommended):**
 ```bash
-impact-scan init-github-action
+poetry install --all-extras
+poetry run impact-scan --help
 ```
 
-**What you get:**
-- ✅ Workflow file in `.github/workflows/impact-scan.yml`
-- ✅ SARIF upload to GitHub Security tab
-- ✅ PR comments with inline vulnerability annotations
-- ✅ Scheduled weekly scans
-- ✅ Manual trigger support
-- ✅ Optional auto-fix PR workflow
-
-**Next steps:**
-1. Add `GROQ_API_KEY` to GitHub Secrets
-2. Commit the workflow file
-3. Push to GitHub
-
-**📚 Full Guide:** [GITHUB_ACTIONS_GUIDE.md](GITHUB_ACTIONS_GUIDE.md)
-
----
-
-### 2. Config-Based Ignore Rules
-
-Suppress false positives or defer fixes using `.impact-scan.yml`:
-
-```yaml
-ignore_rules:
-  # Ignore specific CWE
-  - cwe: "CWE-79"
-    reason: "XSS mitigated by framework"
-    
-  # Ignore by path pattern
-  - rule_id: "python-sql-injection"
-    path: "tests/**"
-    reason: "Test files only"
-    
-  # Time-bound ignore
-  - severity: "LOW"
-    expires: "2025-12-31"
-    reason: "Defer until Q4"
+**With pip:**
+```bash
+python -m venv venv
+source venv/bin/activate  # Windows: .\venv\Scripts\Activate.ps1
+pip install -e .[all]
+pip install semgrep pip-audit safety
 ```
 
-**Generate ignore rules from findings:**
-
+**With Docker:**
 ```bash
-impact-scan scan . --generate-ignore > .impact-scan.yml
+docker build -t impact-scan:latest .
+docker run -v $(pwd):/workspace impact-scan scan /workspace
 ```
 
-**Features:**
-- ✅ Match by CWE, CVE, rule ID, path (glob patterns), severity
-- ✅ Expiration dates for temporary ignores
-- ✅ Required reason field for audit trail
-- ✅ Show ignored findings with `--show-ignored`
+See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 
-**📚 Full Guide:** [IGNORE_RULES.md](IGNORE_RULES.md)
+## Quick Start
 
----
-
-### 3. Automated Fix Application
-
-Apply AI-generated security fixes automatically with safety guardrails:
-
-**Interactive mode** (recommended):
-
+### Basic Scan
 ```bash
-impact-scan scan . --fix
+impact-scan scan /path/to/project
 ```
 
-**Automated mode** (for CI/CD):
-
+### Using Scan Profiles
 ```bash
-impact-scan scan . --fix-auto --yes --fix-strategy conservative
+# Quick scan (HIGH+ severity only)
+impact-scan scan . --profile quick
+
+# Standard scan (MEDIUM+ severity, AI fixes)
+impact-scan scan . --profile standard
+
+# Comprehensive scan (LOW+ severity, AI fixes, web intelligence)
+impact-scan scan . --profile comprehensive
+
+# CI/CD optimized
+impact-scan scan . --profile ci
 ```
 
-**Safety features:**
-- ✅ Requires clean git working directory
-- ✅ Creates backups before modifications
-- ✅ Syntax validation (Python, JavaScript, TypeScript)
-- ✅ Automatic rollback on failures
-- ✅ Optional test suite integration
-- ✅ Confidence thresholds (conservative vs aggressive)
-
-**📚 Full Guide:** [AUTO_FIX.md](AUTO_FIX.md)
-
----
-
-## 🛠️ Installation & Setup
-
-### Prerequisites
-
-- **Python 3.8+**
-- **Semgrep**: `pip install semgrep`
-- **Git** (for auto-fix feature)
-- **Node.js** (optional, for JavaScript syntax validation)
-
-### Install Impact-Scan
-
+### AI-Powered Features
 ```bash
-# From PyPI (recommended)
-pip install impact-scan
+# Generate AI fixes
+impact-scan scan . --ai groq
 
-# From source
-git clone https://github.com/Ani07-05/impact-scan.git
-cd impact-scan
-pip install -e .
+# AI-powered false positive reduction (optional, ~$0.01/scan)
+impact-scan scan . --ai-validation
+
+# Specify AI provider
+impact-scan scan . --ai gemini --ai-validation --ai-validation-provider groq
 ```
 
-### Configure AI Provider
+### Output Formats
+```bash
+# HTML report
+impact-scan scan . --output report.html
 
-Impact-Scan supports multiple AI providers:
+# SARIF for GitHub Security
+impact-scan scan . --output-format sarif --output results.sarif
+
+# Multiple formats
+impact-scan scan . --output-format html,sarif,markdown
+```
+
+## Configuration
+
+### API Keys (Optional)
+
+For AI-powered features, configure at least one provider:
 
 ```bash
-# Groq (fastest, cheapest - recommended)
-export GROQ_API_KEY="your-groq-key"
+# Groq (recommended: fastest + free tier)
+export GROQ_API_KEY='your-key-here'
 
-# Anthropic Claude
-export ANTHROPIC_API_KEY="your-anthropic-key"
-
-# Google Gemini
-export GOOGLE_API_KEY="your-gemini-key"
+# Google Gemini (cheapest: $0.15/1M tokens)
+export GOOGLE_API_KEY='your-key-here'
 
 # OpenAI
-export OPENAI_API_KEY="your-openai-key"
+export OPENAI_API_KEY='your-key-here'
+
+# Anthropic Claude
+export ANTHROPIC_API_KEY='your-key-here'
 ```
 
-Get API keys:
-- **Groq**: https://console.groq.com (free tier: 30 req/min)
-- **Anthropic**: https://console.anthropic.com
-- **Google**: https://ai.google.dev
-- **OpenAI**: https://platform.openai.com
+### Configuration File
 
----
-
-## 📖 Usage Examples
-
-### Example 1: Quick Security Check
-
-```bash
-impact-scan scan . --profile quick
-```
-
-Output:
-```
-✅ Scan complete: 12 vulnerabilities found
-● Critical: 2
-● High: 5
-● Medium: 3
-● Low: 2
-```
-
-### Example 2: Comprehensive Scan with AI Fixes
-
-```bash
-impact-scan scan . --profile comprehensive --ai groq --output-format html --output security-report.html
-```
-
-### Example 3: Scan Specific Directory
-
-```bash
-impact-scan scan ./backend --min-severity high
-```
-
-### Example 4: Generate Ignore Rules
-
-```bash
-# Generate from current findings
-impact-scan scan . --generate-ignore > .impact-scan.yml
-
-# Edit the file to add reasons
-nano .impact-scan.yml
-
-# Re-scan with ignores applied
-impact-scan scan .
-```
-
-### Example 5: Auto-Fix Workflow
-
-```bash
-# 1. Scan and identify fixable issues
-impact-scan scan . --profile comprehensive --ai groq
-
-# 2. Review findings in HTML report
-open security-report.html
-
-# 3. Apply fixes interactively
-impact-scan scan . --fix
-
-# 4. Review changes
-git diff
-
-# 5. Run tests
-pytest
-
-# 6. Commit if all good
-git commit -m "Security fixes from Impact-Scan"
-```
-
-### Example 6: CI/CD Pipeline
+Create `.impact-scan.yml` in your project root:
 
 ```yaml
-# .github/workflows/security-scan.yml
-name: Security Scan
+# Scan settings
+min_severity: medium
+max_findings: 100
 
-on: [push, pull_request]
+# AI provider
+ai:
+  provider: groq
+  enable_fixes: true
+  enable_validation: false
 
-jobs:
-  scan:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Run Impact-Scan
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        run: |
-          pip install impact-scan
-          impact-scan scan . --profile comprehensive --ai groq --output-format sarif --output results.sarif
-      
-      - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: results.sarif
+# Web intelligence
+web_search:
+  enabled: true
+  max_results: 200
+
+stackoverflow:
+  enabled: true
+  max_answers: 5
 ```
 
----
+## Scan Profiles
 
-## ⚙️ Configuration
+| Profile | Min Severity | AI Fixes | Web Search | Dependency Scan | Use Case |
+|---------|-------------|----------|------------|-----------------|----------|
+| `quick` | HIGH | No | No | No | Fast CI checks |
+| `standard` | MEDIUM | Yes | No | Yes | Regular development scans |
+| `comprehensive` | LOW | Yes | Yes | Yes | Complete security audit |
+| `ci` | Configurable | Optional | No | Yes | CI/CD pipelines |
 
-### Scan Profiles
-
-| Profile | AI Fixes | Web Search | Dependency Scan | Min Severity | Use Case |
-|---------|----------|------------|-----------------|--------------|----------|
-| `quick` | ❌ | ❌ | ❌ | HIGH | Fast CI checks |
-| `standard` | ❌ | ❌ | ✅ | MEDIUM | Regular scans |
-| `comprehensive` | ✅ | ✅ | ✅ | LOW | Deep analysis |
-| `dependency-only` | ❌ | ❌ | ✅ | LOW | Package audit |
-
-### Command-Line Options
+## Command Reference
 
 ```bash
-impact-scan scan [PATH] [OPTIONS]
+# Scanning
+impact-scan scan <path>                    # Basic scan
+impact-scan scan . --profile comprehensive # Use profile
+impact-scan scan . --min-severity high     # Filter by severity
 
-Scanning:
-  --profile TEXT              Scan profile (quick, standard, comprehensive, dependency-only)
-  --min-severity TEXT         Minimum severity (critical, high, medium, low)
-  --config FILE               Path to config file
+# AI Features
+impact-scan scan . --ai groq              # Generate fixes
+impact-scan scan . --ai-validation        # Reduce false positives
 
-AI & Intelligence:
-  --ai TEXT                   AI provider (groq, anthropic, gemini, openai)
-  --disable-ai-fixes         Disable AI fix generation
-  --disable-web-search       Disable web intelligence
+# Output
+impact-scan scan . -o report.html         # HTML report
+impact-scan scan . --output-format sarif  # SARIF format
+impact-scan scan . --output-format all    # All formats
 
-Output:
-  --output-format TEXT        Format (json, html, sarif, all)
-  --output PATH               Output file path
-  --verbose, -v              Verbose output
+# Interfaces
+impact-scan tui                           # Interactive TUI
+impact-scan web                           # Web UI (http://127.0.0.1:5000)
+impact-scan web --port 8080               # Custom port
 
-Ignore Rules:
-  --generate-ignore          Generate .impact-scan.yml from findings
-  --show-ignored             Show ignored findings in report
-
-Auto-Fix:
-  --fix                      Interactive fix mode with confirmations
-  --fix-auto                 Automated fix mode (no prompts)
-  --fix-strategy TEXT        Strategy: conservative (high) or aggressive (medium)
-  --yes, -y                  Auto-confirm all prompts
+# Configuration
+impact-scan init                          # Generate config file
+impact-scan profiles                      # List available profiles
+impact-scan config                        # Check API key configuration
+impact-scan --version                     # Show version
 ```
 
----
+## JWT/OAuth Security Detection
 
-## 📊 Output Formats
+Impact-Scan includes comprehensive JWT and OAuth vulnerability detection:
 
-### HTML Report
+**Custom Rules (16 rules):**
+- JWT decode without signature verification (CWE-347)
+- Missing algorithm specification (CWE-327)
+- Hardcoded JWT secrets (CWE-798)
+- "none" algorithm usage
+- Weak secrets (CWE-521)
+- Missing OAuth state parameter (CWE-352)
+- ID token not verified (CWE-345)
+- Wildcard CORS with credentials (CWE-942)
+
+**Semgrep Registry (25+ rules):**
+- Official JWT security rules from Semgrep p/jwt ruleset
+
+**Supported Languages:** Python, JavaScript, TypeScript, Node.js, Ruby, Java, Go
+
+## AI-Powered False Positive Reduction
+
+Optionally reduce false positives by up to 91% using AI validation:
 
 ```bash
-impact-scan scan . --output-format html --output report.html
+# Enable AI validation (opt-in)
+impact-scan scan . --ai-validation
+
+# Specify provider and cost limit
+impact-scan scan . --ai-validation --ai-validation-provider groq --ai-validation-limit 20
+
+# Save false positives for review
+impact-scan scan . --ai-validation --save-false-positives
+```
+
+**Benefits:**
+- 91% false positive reduction (based on SAST-Genius research)
+- Contextual analysis catches business logic flaws
+- Cost-effective: ~$0.01/scan with Gemini 2.5 Flash
+- Fail-open design: keeps findings if validation fails
+
+**Supported Providers:**
+- Groq: Fastest, free tier available
+- Gemini 2.5 Flash: Cheapest ($0.15/1M input tokens)
+- GPT-4o-mini: Good balance ($0.15/1M input)
+- Claude 3.7 Sonnet: Highest quality ($3/1M input)
+
+## GitHub Actions Integration
+
+The repository includes a production-ready GitHub Actions workflow:
+
+```bash
+# Use the included workflow
+cp .github/workflows/impact-scan.yml.example .github/workflows/impact-scan.yml
 ```
 
 **Features:**
-- Interactive charts and metrics
-- Filterable by severity
-- Code snippets with syntax highlighting
-- AI fix suggestions with confidence scores
-- Export to PDF
+- Runs on push, PR, and weekly schedule
+- Uploads SARIF to GitHub Security tab
+- Generates HTML and Markdown reports as artifacts
+- Posts scan results as PR comments
+- Configurable scan profiles via workflow dispatch
+- Fails build on critical vulnerabilities
 
-### SARIF Format
+**Required Secrets (optional, for AI features):**
+- `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, or `OPENAI_API_KEY`
 
-```bash
-impact-scan scan . --output-format sarif --output results.sarif
-```
+**Required Permissions:**
+- `contents: read` - Checkout code
+- `security-events: write` - Upload SARIF
+- `pull-requests: write` - Comment on PRs
 
-**Upload to GitHub:**
-```yaml
-- uses: github/codeql-action/upload-sarif@v3
-  with:
-    sarif_file: results.sarif
-```
-
-### JSON Export
+## Docker Usage
 
 ```bash
-impact-scan scan . --output-format json --output findings.json
+# Build image
+docker build -t impact-scan:latest .
+
+# Run scan
+docker run -v $(pwd):/workspace impact-scan scan /workspace
+
+# Use profiles
+docker run -v $(pwd):/workspace impact-scan scan /workspace --profile comprehensive
+
+# Web UI
+docker run -p 5000:5000 -v $(pwd):/workspace impact-scan web --no-browser
+
+# Docker Compose
+docker-compose run scan
+docker-compose up web
 ```
 
-**Integrate with other tools:**
-```python
-import json
+## Architecture
 
-with open('findings.json') as f:
-    data = json.load(f)
-    
-for finding in data['findings']:
-    print(f"{finding['severity']}: {finding['title']}")
-```
+### Core Modules
+- **entrypoint.py**: Scan orchestration and entry point detection
+- **static_scan.py**: Static analysis (Bandit, Semgrep)
+- **dep_audit.py**: Dependency vulnerability scanning
+- **unified_dependency_scanner.py**: Python and JavaScript package scanning
+- **aggregator.py**: Result deduplication and filtering
+- **fix_ai.py**: AI-powered fix generation
+- **ai_validator.py**: AI-powered false positive reduction
+- **renderer.py**: Terminal output with Rich formatting
+- **html_report.py**: HTML report generation
+- **parsebot_client.py**: Web intelligence integration
+- **stackoverflow_scraper.py**: Stack Overflow integration
 
----
+### Data Flow
+1. CLI parses arguments and loads configuration
+2. Entry point detection identifies application frameworks
+3. Static analysis and dependency scanners run in parallel
+4. Results aggregated, deduplicated, and filtered
+5. Optional AI fix generation via supported providers
+6. Optional AI validation for false positive reduction
+7. Output rendered to terminal, HTML, SARIF, or Markdown
 
-## 🔐 Security Best Practices
+## System Requirements
 
-### 1. Regular Scanning
+- **Python**: 3.9 or higher
+- **OS**: Linux, macOS, or Windows
+- **Disk Space**: ~500MB for full installation
+- **Memory**: 2GB minimum, 4GB recommended
+- **External Tools**: Semgrep, pip-audit, Safety (auto-installed)
 
+## Troubleshooting
+
+### "No module named 'impact_scan'"
+
+**Solution**: Use `poetry run` prefix with Poetry installations:
 ```bash
-# Weekly comprehensive scan
-cron: 0 2 * * 1
-impact-scan scan . --profile comprehensive --ai groq
+poetry run impact-scan scan .
 ```
 
-### 2. Pre-Commit Hooks
-
+Or activate the virtual environment first:
 ```bash
-# .git/hooks/pre-commit
-#!/bin/bash
-impact-scan scan . --profile quick --min-severity high
-if [ $? -ne 0 ]; then
-    echo "Security issues found! Fix before committing."
-    exit 1
-fi
+source venv/bin/activate  # Then use: impact-scan scan .
 ```
 
-### 3. Pull Request Checks
+### "semgrep: command not found"
 
-Use GitHub Actions to block PRs with critical vulnerabilities.
-
-### 4. Dependency Updates
-
+**Solution**: Install Semgrep:
 ```bash
-# Monthly dependency audit
-impact-scan scan . --profile dependency-only
+pip install semgrep
 ```
 
-### 5. Review Auto-Fixes
+See [INSTALL.md](INSTALL.md) for more troubleshooting.
 
-Always review auto-fix changes before merging:
-```bash
-git diff HEAD~1
-pytest
-```
+## Contributing
 
----
-
-## 🤝 Contributing
-
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-**Areas for contribution:**
-- Additional Semgrep rules
-- New AI providers
-- Improved fix generation
+Contributions are welcome! Areas for contribution:
+- Additional Semgrep security rules
+- New AI provider integrations
+- Improved fix generation logic
 - Documentation improvements
 - Bug reports and feature requests
 
----
-
-## 📜 License
+## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
----
+## Acknowledgments
 
-## 🙏 Acknowledgments
+- Semgrep for static analysis engine
+- OSV database for vulnerability information
+- AI providers: Groq, Google, OpenAI, Anthropic
+- OWASP for security best practices
 
-- **Semgrep** for static analysis engine
-- **Anthropic, Google, Groq, OpenAI** for AI capabilities
-- **OWASP** for security knowledge and best practices
-- All contributors and users of Impact-Scan
+## Support
 
----
-
-## 📞 Support & Community
-
-- **GitHub Issues**: https://github.com/Ani07-05/impact-scan/issues
-- **Discussions**: https://github.com/Ani07-05/impact-scan/discussions
-- **Documentation**: [docs/](docs/)
+- GitHub Issues: https://github.com/Ani07-05/impact-scan/issues
+- Documentation: See [INSTALL.md](INSTALL.md) and [CLAUDE.md](CLAUDE.md)
 
 ---
 
-**Made with ❤️ by the Impact-Scan Team**
-
-*Last updated: January 2025 | Version: 0.2.0*
+**Version:** 0.2.0 | **Last Updated:** January 2025
