@@ -89,6 +89,10 @@ rules:
           CORSMiddleware(..., allow_origins=["*"], ..., allow_credentials=True, ...)
       - pattern: |
           CORSMiddleware(..., allow_credentials=True, ..., allow_origins=["*"], ...)
+      - pattern: |
+          $APP.add_middleware(..., allow_origins=["*"], ..., allow_credentials=True, ...)
+      - pattern: |
+          $APP.add_middleware(..., allow_credentials=True, ..., allow_origins=["*"], ...)
     message: |
       CRITICAL: CORS configured with allow_origins=["*"] AND allow_credentials=True.
 

@@ -25,7 +25,7 @@ async def test_path_browser_modal_composition():
         # Verify key widgets exist
         assert modal.query_one("#path-tree") is not None
         assert modal.query_one("#select-path") is not None
-        assert modal.query_one("#go-home") is not None
+        assert modal.query_one("#go-back") is not None
         assert modal.query_one("#cancel-path") is not None
 
 
