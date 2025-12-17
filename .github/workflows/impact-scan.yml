@@ -43,7 +43,7 @@ jobs:
       - name: Install Impact-Scan
         run: |
           python -m pip install --upgrade pip
-          pip install impact-scan
+          pip install .
           # Or install from repo:
           # git clone https://github.com/Ani07-05/impact-scan.git
           # cd impact-scan && pip install -e .
