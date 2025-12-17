@@ -6,7 +6,7 @@
 
 **Impact Scan** is an advanced, AI-powered security vulnerability scanner for codebases. It goes beyond traditional static analysis by leveraging Large Language Models (LLMs) to understand context, reduce false positives, and suggest intelligent fixes.
 
-## 🚀 Features
+## Features
 
 - **AI-Powered Analysis**: Uses models like GPT-4, Claude, or Gemini to validate findings and explain vulnerabilities.
 - **Agentic Architecture**:
@@ -17,7 +17,7 @@
 - **Knowledge Graph**: visualizations of your project's security posture.
 - **CI/CD Ready**: Easy integration with GitHub Actions and other pipelines.
 
-## 🛠️ Installation
+## Installation
 
 ```bash
 pip install impact-scan
@@ -25,7 +25,7 @@ pip install impact-scan
 poetry add impact-scan
 ```
 
-## 📖 Usage
+## Usage
 
 ### Basic Scan
 Scan the current directory:
@@ -51,7 +51,7 @@ Run in automated environments:
 impact-scan scan . --fix-auto --yes --min-severity high
 ```
 
-## ⚙️ Configuration
+## Configuration
 
 Create a `.impact-scan.yml` file in your root directory:
 
@@ -65,10 +65,11 @@ ignore_paths:
   - node_modules/
 ```
 
-## 🤝 Contributing
+## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
