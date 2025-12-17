@@ -10,6 +10,8 @@ from .fix import FixAgent
 from .orchestrator import AgentOrchestrator
 from .recon import ReconAgent
 from .vuln import VulnAgent
+from .static_analysis_agent import StaticAnalysisAgent
+from ..core.comprehensive_security_crawler import ComprehensiveSecurityCrawler
 
 __all__ = [
     "Agent",
@@ -21,4 +23,6 @@ __all__ = [
     "ExploitAgent",
     "FixAgent",
     "ComplianceAgent",
+    "StaticAnalysisAgent",
+    "ComprehensiveSecurityCrawler",
 ]

@@ -1,0 +1,8 @@
+rules:
+  - id: react-dangerouslysetinnerhtml
+    patterns:
+      - pattern: |
+          <$TAG ... dangerouslySetInnerHTML={...} ... />
+    message: "Detected dangerouslySetInnerHTML"
+    languages: [javascript, typescript]
+    severity: WARNING

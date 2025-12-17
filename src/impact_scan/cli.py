@@ -23,8 +23,17 @@ from impact_scan.agents import (
 )
 from impact_scan.core import aggregator, entrypoint, renderer
 from impact_scan.core.html_report import save_report
-from impact_scan.core.markdown_report import save_markdown_report
-from impact_scan.core.sarif_report import save_sarif_report
+
+# Conditional imports for optional report formats
+try:
+    from impact_scan.core.markdown_report import save_markdown_report
+except ImportError:
+    save_markdown_report = None
+
+try:
+    from impact_scan.core.sarif_report import save_sarif_report
+except ImportError:
+    save_sarif_report = None
 from impact_scan.utils import config_file, logging_config, profiles, schema
 from impact_scan.utils.auto_installer import ensure_scanning_tools, get_installer
 
@@ -113,7 +122,7 @@ def scan_command(
     path: Path = typer.Argument(
         ".",
         exists=True,
-        file_okay=False,
+        file_okay=True,
         dir_okay=True,
         readable=True,
         resolve_path=True,
@@ -219,6 +228,16 @@ def scan_command(
         "--show-ignored",
         help="Include ignored findings in output reports",
     ),
+    enable_ai_fixes: bool = typer.Option(
+        False,
+        "--enable-ai-fixes",
+        help="Enable AI-powered fix generation",
+    ),
+    enable_stackoverflow: bool = typer.Option(
+        False,
+        "--enable-stackoverflow",
+        help="Enable Stack Overflow citation search",
+    ),
     fix: bool = typer.Option(
         False,
         "--fix",
@@ -257,10 +276,23 @@ def scan_command(
     log_level = "DEBUG" if verbose else "INFO"
     logging_config.setup_logging(level=log_level)
 
+
+    # Detect JSON output mode (VS Code extension)
+    json_stdout = False
+    if output_format and "json" in output_format.lower().split(","):
+        json_stdout = True
+        # Redirect all decorative output to stderr to keep stdout clean for JSON
+        import sys
+        # Save original stdout for the actual JSON output
+        original_stdout = sys.stdout
+        # Redirect standard stdout to stderr so all stray prints (including rich) go there
+        sys.stdout = sys.stderr
+        console.file = sys.stderr
+
     logger.info("Starting Impact Scan v0.3.0")
 
     # Display minimal ASCII logo
-    if UI_AVAILABLE:
+    if UI_AVAILABLE and not json_stdout:
         console.print()  # Blank line
         print_logo(style="minimal")
         console.print()  # Blank line
@@ -435,6 +467,7 @@ def scan_command(
         # Core scanning
         scan_result = entrypoint.run_scan(config)
 
+
         # Display knowledge graph tree visualization (post-scan summary)
         if UI_AVAILABLE and scan_result.findings:
             try:
@@ -568,11 +601,12 @@ def scan_command(
             fixer = AutoFixer(dry_run=dry_run, require_clean_git=True)
 
             # Check git status
-            if GitHelper.is_git_repo(path):
-                current_branch = GitHelper.get_current_branch(path)
+            git_path = path if path.is_dir() else path.parent
+            if GitHelper.is_git_repo(git_path):
+                current_branch = GitHelper.get_current_branch(git_path)
                 console.print(f"Git repository detected: {current_branch}")
 
-                if not GitHelper.is_working_directory_clean(path):
+                if not GitHelper.is_working_directory_clean(git_path):
                     console.print(
                         "[bold red]ERROR: Git working directory not clean![/bold red]"
                     )
@@ -588,7 +622,7 @@ def scan_command(
                     )
                     if create_branch:
                         branch_name = f"impact-scan-fixes-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-                        if GitHelper.create_branch(branch_name, path):
+                        if GitHelper.create_branch(branch_name, git_path):
                             console.print(
                                 f"[green]Created branch: {branch_name}[/green]"
                             )
@@ -596,7 +630,7 @@ def scan_command(
                             console.print("[red]ERROR: Failed to create branch![/red]")
 
                             # Check if on protected branch
-                            current_branch = GitHelper.get_current_branch(path)
+                            current_branch = GitHelper.get_current_branch(git_path)
                             if current_branch in ["main", "master", "develop"]:
                                 console.print(
                                     f"[red]Cannot apply fixes on protected branch '{current_branch}'[/red]"
@@ -707,7 +741,7 @@ def scan_command(
                                 raise typer.Exit(code=1)
 
                 # Commit changes if git repo
-                if GitHelper.is_git_repo(path) and success_count > 0:
+                if GitHelper.is_git_repo(git_path) and success_count > 0:
                     if not fix_auto or not yes:
                         commit = typer.confirm("\nCommit fixes to git?", default=True)
                     else:
@@ -724,7 +758,7 @@ def scan_command(
                         if len([r for r in results if r.success]) > 10:
                             commit_msg += f"... and {len([r for r in results if r.success]) - 10} more\n"
 
-                        if GitHelper.commit_changes(commit_msg, path):
+                        if GitHelper.commit_changes(commit_msg, git_path):
                             console.print("[green]Changes committed to git[/green]")
                         else:
                             console.print(
@@ -753,37 +787,38 @@ def scan_command(
                 raise typer.Exit(code=1)
 
         # Show results
-        console.print("\n" + "=" * 80)
-        console.print("[bold green]SCAN RESULTS[/bold green]")
-        console.print("=" * 80)
+        if not json_stdout:
+            console.print("\n" + "=" * 80)
+            console.print("[bold green]SCAN RESULTS[/bold green]")
+            console.print("=" * 80)
 
-        # Create summary table
-        summary_table = Table.grid(padding=1)
-        summary_table.add_column(style="cyan", min_width=25)
-        summary_table.add_column(style="bold white")
+            # Create summary table
+            summary_table = Table.grid(padding=1)
+            summary_table.add_column(style="cyan", min_width=25)
+            summary_table.add_column(style="bold white")
 
-        summary_table.add_row("Total Findings:", str(scan_result.total_findings))
-        summary_table.add_row("Files Scanned:", str(scan_result.scanned_files))
-        summary_table.add_row("[TIME] Duration:", f"{scan_result.scan_duration:.1f}s")
+            summary_table.add_row("Total Findings:", str(scan_result.total_findings))
+            summary_table.add_row("Files Scanned:", str(scan_result.scanned_files))
+            summary_table.add_row("[TIME] Duration:", f"{scan_result.scan_duration:.1f}s")
 
-        # Show findings by severity
-        for severity in [
-            schema.Severity.CRITICAL,
-            schema.Severity.HIGH,
-            schema.Severity.MEDIUM,
-            schema.Severity.LOW,
-        ]:
-            count = len([f for f in scan_result.findings if f.severity == severity])
-            if count > 0:
-                icon = {
-                    "critical": "[red]*[/red]",
-                    "high": "[yellow]*[/yellow]",
-                    "medium": "[orange1]*[/orange1]",
-                    "low": "[blue]*[/blue]",
-                }[severity.value]
-                summary_table.add_row(f"{icon} {severity.value.title()}:", str(count))
+            # Show findings by severity
+            for severity in [
+                schema.Severity.CRITICAL,
+                schema.Severity.HIGH,
+                schema.Severity.MEDIUM,
+                schema.Severity.LOW,
+            ]:
+                count = len([f for f in scan_result.findings if f.severity == severity])
+                if count > 0:
+                    icon = {
+                        "critical": "[red]*[/red]",
+                        "high": "[yellow]*[/yellow]",
+                        "medium": "[orange1]*[/orange1]",
+                        "low": "[blue]*[/blue]",
+                    }[severity.value]
+                    summary_table.add_row(f"{icon} {severity.value.title()}:", str(count))
 
-        console.print(summary_table)
+            console.print(summary_table)
 
         # Save output if requested
         if output or output_format:
@@ -812,8 +847,11 @@ def scan_command(
                     formats_to_generate = [ext_map.get(ext, "html")]
 
                 # Generate each format
+                path_obj = Path(path)
                 base_path = (
-                    Path(output) if output else Path(path) / "impact-scan-report"
+                    Path(output) 
+                    if output 
+                    else (path_obj.parent / "impact-scan-report" if path_obj.is_file() else path_obj / "impact-scan-report")
                 )
 
                 for fmt in formats_to_generate:
@@ -835,13 +873,24 @@ def scan_command(
                             if output
                             else Path(str(base_path) + ".json")
                         )
-                        console.print(
-                            f"\n[bold]Saving JSON report to[/bold] [cyan]{output_path}[/cyan]..."
-                        )
+                        if not json_stdout:
+                            console.print(
+                                f"\n[bold]Saving JSON report to[/bold] [cyan]{output_path}[/cyan]..."
+                            )
                         aggregator.save_to_json(scan_result, output_path)
-                        console.print("   [green]OK:[/green] JSON report saved")
+                        if not json_stdout:
+                            console.print("   [green]OK:[/green] JSON report saved")
+                        
+                        if json_stdout:
+                            # Print JSON to stdout for VS Code extension
+                            print(output_path.read_text(encoding="utf-8"), file=original_stdout)
 
                     elif fmt == "markdown" or fmt == "md":
+                        if save_markdown_report is None:
+                            console.print(
+                                f"\n[yellow]WARN:[/yellow] Markdown report module not available"
+                            )
+                            continue
                         output_path = (
                             base_path.with_suffix(".md")
                             if output
@@ -856,6 +905,11 @@ def scan_command(
                         )
 
                     elif fmt == "sarif":
+                        if save_sarif_report is None:
+                            console.print(
+                                f"\n[yellow]WARN:[/yellow] SARIF report module not available"
+                            )
+                            continue
                         output_path = (
                             base_path.with_suffix(".sarif")
                             if output
@@ -869,9 +923,10 @@ def scan_command(
                             "   [green]OK:[/green] SARIF report saved (GitHub Code Scanning ready)"
                         )
 
-                console.print(
-                    "\n[bold green]All reports saved successfully![/bold green]"
-                )
+                if not json_stdout:
+                    console.print(
+                        "\n[bold green]All reports saved successfully![/bold green]"
+                    )
 
             except Exception as e:
                 logger.error(f"Failed to save report: {e}")
@@ -879,19 +934,21 @@ def scan_command(
                 raise typer.Exit(code=1)
 
         # Show detailed findings only if there are any and not too many
-        if scan_result.findings and len(scan_result.findings) <= 10:
-            console.print(f"\nShowing {len(scan_result.findings)} findings:")
-            renderer.print_findings(scan_result, config.min_severity)
-        elif len(scan_result.findings) > 10:
-            console.print(
-                f"\nFound {len(scan_result.findings)} findings (use --output to save full report)"
-            )
+        if not json_stdout:
+            if scan_result.findings and len(scan_result.findings) <= 10:
+                console.print(f"\nShowing {len(scan_result.findings)} findings:")
+                renderer.print_findings(scan_result, config.min_severity)
+            elif len(scan_result.findings) > 10:
+                console.print(
+                    f"\nFound {len(scan_result.findings)} findings (use --output to save full report)"
+                )
 
         # Final status
         end_time = time.time()
-        console.print(
-            f"\nScan completed in [yellow]{end_time - start_time:.1f}s[/yellow]"
-        )
+        if not json_stdout:
+            console.print(
+                f"\nScan completed in [yellow]{end_time - start_time:.1f}s[/yellow]"
+            )
 
         # Exit with appropriate code
         critical_count = len(
@@ -969,6 +1026,11 @@ def scan_file_command(
         "--ai-fixes",
         help="Generate AI-powered fix suggestions",
     ),
+    ai_provider: Optional[str] = typer.Option(
+        None,
+        "--ai-provider",
+        help="AI provider for fixes: groq, openai, anthropic, gemini",
+    ),
 ):
     """
     Scan a single file (optimized for VS Code extension integration).
@@ -984,10 +1046,21 @@ def scan_file_command(
     from impact_scan.utils import schema
 
     # Configure minimal scan for single file
+    # Resolve AI provider if AI fixes requested
+    resolved_ai_provider = None
+    if ai_fixes:
+        if ai_provider:
+            resolved_ai_provider = schema.AIProvider(ai_provider)
+        else:
+            # Auto-detect from environment
+            api_keys = schema.APIKeys()
+            resolved_ai_provider = profiles.auto_detect_ai_provider(api_keys)
+
     config = schema.ScanConfig(
         root_path=str(file_path.parent),
         min_severity=schema.Severity.MEDIUM,  # Only show medium+ for editor
         enable_ai_fixes=ai_fixes,
+        ai_provider=resolved_ai_provider,
         enable_web_search=False,  # Disable for speed
         enable_stackoverflow=False,
         enable_ai_audit=False,  # Disable for speed
@@ -1137,7 +1210,7 @@ def agent_scan_command(
     path: Path = typer.Argument(
         ".",
         exists=True,
-        file_okay=False,
+        file_okay=True,
         dir_okay=True,
         readable=True,
         resolve_path=True,
@@ -1913,13 +1986,21 @@ def start_command():
                 import json
                 Path(output_path).write_text(json.dumps([f.model_dump() for f in scan_result.findings], indent=2))
             elif output_format == "markdown":
-                save_markdown_report(scan_result, Path(output_path))
+                if save_markdown_report:
+                    save_markdown_report(scan_result, Path(output_path))
+                else:
+                    console.print("[yellow]Markdown report module not available[/yellow]")
             elif output_format == "sarif":
-                save_sarif_report(scan_result, Path(output_path))
+                if save_sarif_report:
+                    save_sarif_report(scan_result, Path(output_path))
+                else:
+                    console.print("[yellow]SARIF report module not available[/yellow]")
             elif output_format == "all":
                 save_report(scan_result, Path(f"{output_path}.html"))
-                save_markdown_report(scan_result, Path(f"{output_path}.md"))
-                save_sarif_report(scan_result, Path(f"{output_path}.sarif"))
+                if save_markdown_report:
+                    save_markdown_report(scan_result, Path(f"{output_path}.md"))
+                if save_sarif_report:
+                    save_sarif_report(scan_result, Path(f"{output_path}.sarif"))
 
             console.print(f"[green]Report saved![/green]")
 
@@ -1931,7 +2012,7 @@ def start_command():
         raise typer.Exit(code=1)
 
 
-@app.command("init")
+@app.command("setup")
 def init_command(
     skip_install: bool = typer.Option(
         False, "--skip-install", help="Skip dependency installation"

@@ -358,9 +358,8 @@ class ScanConfig(BaseModel):
         if not v.exists():
             raise ValueError(f"Target path does not exist: {v}")
 
-        # Must be a directory
-        if not v.is_dir():
-            raise ValueError(f"Target path must be a directory: {v}")
+        if not v.exists():
+            raise ValueError(f"Target path must exist: {v}")
 
         # Check for reasonable path length
         if len(str(v)) > 1000:

@@ -7,6 +7,7 @@ from typing import Iterator, List
 
 from ..utils import paths, schema
 from . import dep_audit, fix_ai, project_classifier, static_scan, repo_graph_integration
+from ..agents import StaticAnalysisAgent, ComprehensiveSecurityCrawler, AgentResult
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -102,23 +103,36 @@ def run_scan(config: schema.ScanConfig) -> schema.ScanResult:
     start_time = time.time()
 
     try:
-        # 1. AI-powered project classification (replaces entry point detection)
-        logger.info("Classifying project type with AI...")
         project_context = None
-        try:
-            project_context = project_classifier.classify_project(
-                Path(config.root_path),
-                api_keys=config.api_keys
+
+        if config.root_path.is_file():
+            logger.info(f"Target is a single file: {config.root_path}. Skipping project classification.")
+            project_context = project_classifier.ProjectContext(
+                project_type="Single File",
+                frameworks=[],
+                languages=[config.root_path.suffix.lstrip('.') if config.root_path.suffix else "unknown"],
+                is_library=False,
+                is_web_app=False,
+                description="Single file scan",
+                security_context={}
             )
-            if project_context:
-                logger.info(f"Project Type: {project_context.project_type}")
-                logger.info(f"Frameworks: {', '.join(project_context.frameworks) or 'None detected'}")
-                logger.info(f"Languages: {', '.join(project_context.languages)}")
-                logger.info(f"Description: {project_context.description}")
-            else:
-                logger.warning("Project classification unavailable, using default rules")
-        except Exception as e:
-            logger.warning(f"Project classification failed: {e}, using default rules")
+        else:
+            # 1. AI-powered project classification (replaces entry point detection)
+            logger.info("Classifying project type with AI...")
+            try:
+                project_context = project_classifier.classify_project(
+                    Path(config.root_path),
+                    api_keys=config.api_keys
+                )
+                if project_context:
+                    logger.info(f"Project Type: {project_context.project_type}")
+                    logger.info(f"Frameworks: {', '.join(project_context.frameworks) or 'None detected'}")
+                    logger.info(f"Languages: {', '.join(project_context.languages)}")
+                    logger.info(f"Description: {project_context.description}")
+                else:
+                    logger.warning("Project classification unavailable, using default rules")
+            except Exception as e:
+                logger.warning(f"Project classification failed: {e}, using default rules")
 
         # 1.5. Build repository + semantic knowledge graphs for context-aware validation
         repo_graph = repo_graph_integration.build_repository_graph_for_scan(
@@ -134,8 +148,18 @@ def run_scan(config: schema.ScanConfig) -> schema.ScanResult:
         all_findings = []
 
         try:
-            logger.info("Running static analysis scan...")
-            static_findings = static_scan.run_scan(config, project_context)
+            logger.info("Running static analysis scan (Agent-based)...")
+            # static_findings = static_scan.run_scan(config, project_context)
+            
+            # Initialize Agent
+            agent = StaticAnalysisAgent(name="static_analyser", config=config)
+            agent_result = AgentResult(agent_name="static_analyser")
+            
+            # Execute Agent (wrap in asyncio for sync context)
+            import asyncio
+            asyncio.run(agent.execute(config.root_path, context={"project": project_context}, result=agent_result))
+            
+            static_findings = agent_result.findings
             all_findings.extend(static_findings)
         except Exception as e:
             logger.error(f"Static analysis scan failed: {e}")
@@ -253,13 +277,18 @@ def run_scan(config: schema.ScanConfig) -> schema.ScanResult:
 
                 # Find Python files in auth/config directories (high priority)
                 python_files = []
-                for pattern in [
-                    "**/auth/*.py",
-                    "**/main.py",
-                    "**/app.py",
-                    "**/routes/*.py",
-                ]:
-                    python_files.extend(config.root_path.glob(pattern))
+                if config.root_path.is_file():
+                     # If scanning a single file, just check if it matches relevant patterns (or just include it if it's Python)
+                     if config.root_path.suffix == ".py":
+                         python_files.append(config.root_path)
+                else:
+                    for pattern in [
+                        "**/auth/*.py",
+                        "**/main.py",
+                        "**/app.py",
+                        "**/routes/*.py",
+                    ]:
+                        python_files.extend(config.root_path.glob(pattern))
 
                 # Limit to reasonable number
                 python_files = list(set(python_files))[:20]
@@ -333,17 +362,28 @@ async def enrich_findings_async(
 
     # Web search enrichment temporarily disabled (module refactoring in progress)
     # TODO: Re-enable after web intelligence module is restructured
-    # if config.enable_web_search:
-    #     logger.info("Running web intelligence enrichment...")
-    #     try:
-    #         # Offload sync function to thread to avoid blocking and event loop issues
-    #         import asyncio
-    #
-    #         await asyncio.to_thread(
-    #             web_search.process_findings_for_web_fixes, findings, config
-    #         )
-    #     except Exception as e:
-    #         logger.error(f"Web intelligence enrichment failed: {e}")
+    if config.enable_web_search:
+        logger.info("Running web intelligence enrichment (Comprehensive Security Crawler)...")
+        try:
+            # Use the new Comprehensive Security Crawler
+            async with ComprehensiveSecurityCrawler(config) as crawler:
+                logger.info("Starting comprehensive vulnerability research...")
+                for finding in findings:
+                    # Provide intelligence for medium+ severity
+                    if finding.severity in [schema.Severity.HIGH, schema.Severity.CRITICAL]:
+                         report = await crawler.comprehensive_vulnerability_research(finding)
+                         # Attach intelligence to finding metadata
+                         if not finding.metadata:
+                             finding.metadata = {}
+                         finding.metadata["security_intelligence"] = {
+                             "confidence": report.confidence_score,
+                             "exploits": len(report.static_intelligence.exploits),
+                             "patches": len(report.static_intelligence.patches),
+                             "risk_score": report.risk_assessment.get("final_risk_score", 0),
+                             "insights": report.actionable_insights
+                         }
+        except Exception as e:
+            logger.error(f"Web intelligence enrichment failed: {e}")
 
     if config.enable_ai_fixes:
         logger.info("Running AI fix generation...")

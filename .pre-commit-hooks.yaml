@@ -1,0 +1,31 @@
+# Pre-commit hooks for impact-scan
+# Users install with: pre-commit install
+# Docs: https://pre-commit.com/
+
+repos:
+  - repo: https://github.com/yourusername/impact-scan
+    rev: v0.3.0
+    hooks:
+      - id: impact-scan
+        name: Impact-Scan Security Check
+        entry: impact-scan scan-staged
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [commit]
+
+      - id: impact-scan-critical-only
+        name: Impact-Scan (Critical Only)
+        entry: impact-scan scan-staged --fail-on critical
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [commit]
+
+      - id: impact-scan-quick
+        name: Impact-Scan (Quick Scan)
+        entry: impact-scan scan-staged --profile quick --fail-on high
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [commit]

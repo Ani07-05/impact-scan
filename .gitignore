@@ -175,3 +175,9 @@ hexa/
 *.json
 !pyproject.toml
 !package.json
+
+# Node.js
+node_modules/
+
+# Generated docs
+docs/analysis/

@@ -20,6 +20,7 @@ class PathBrowserModal(ModalScreen[str]):
     BINDINGS = [
         Binding("escape", "dismiss", "Cancel"),
         Binding("enter", "select_path", "Select"),
+        Binding("backspace", "go_back", "Go Back"),
     ]
 
     def __init__(self, current_path: Path = None) -> None:
@@ -48,7 +49,7 @@ class PathBrowserModal(ModalScreen[str]):
                     "Select", variant="success", classes="action-btn", id="select-path"
                 )
                 yield Button(
-                    "Home", variant="primary", classes="action-btn", id="go-home"
+                    "Back", variant="primary", classes="action-btn", id="go-back"
                 )
                 yield Button(
                     "Cancel", variant="default", classes="action-btn", id="cancel-path"
@@ -64,14 +65,18 @@ class PathBrowserModal(ModalScreen[str]):
         """Select current path and close modal."""
         self.dismiss(str(self.selected_path))
 
-    @on(Button.Pressed, "#go-home")
-    def go_home(self) -> None:
-        """Navigate to home directory."""
-        home_path = Path.home()
+    @on(Button.Pressed, "#go-back")
+    def go_back(self) -> None:
+        """Navigate to parent directory."""
         tree = self.query_one("#path-tree", DirectoryTree)
-        tree.path = str(home_path)
-        tree.reload()
-        self.selected_path = home_path
+        current = Path(tree.path)
+
+        # Navigate to parent if not already at root
+        if current.parent != current:  # Not at filesystem root
+            parent_path = current.parent
+            tree.path = str(parent_path)
+            tree.reload()
+            self.selected_path = parent_path
 
     @on(Button.Pressed, "#cancel-path")
     def cancel_path(self) -> None:
@@ -85,3 +90,7 @@ class PathBrowserModal(ModalScreen[str]):
     def action_select_path(self) -> None:
         """Select via Enter key."""
         self.dismiss(str(self.selected_path))
+
+    def action_go_back(self) -> None:
+        """Go back to parent directory via Backspace key."""
+        self.go_back()

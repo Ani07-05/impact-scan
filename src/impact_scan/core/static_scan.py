@@ -1,4 +1,4 @@
-import json
+﻿import json
 import logging
 import os
 import shutil
@@ -62,8 +62,8 @@ def _select_semgrep_rules(project_context, local_rules_path: Path) -> List[str]:
         # Library-aware filtering: Skip web-specific rules for libraries
         if project_context.is_library:
             logger.info("Library detected - skipping web-specific security rules")
-            logger.info("  → Skipping: JWT/OAuth, XSS, CSRF, Session Management, Path Traversal")
-            logger.info("  → These vulnerabilities only apply to web applications")
+            logger.info("  â†’ Skipping: JWT/OAuth, XSS, CSRF, Session Management, Path Traversal")
+            logger.info("  â†’ These vulnerabilities only apply to web applications")
             # For libraries, only language-specific rules are added (already done above)
         else:
             # Not a library - add web-specific rules based on security context
@@ -126,8 +126,8 @@ def run_semgrep_scan(root_path: Path, project_context=None) -> List[schema.Findi
         root_path: Root directory to scan
         project_context: Optional ProjectContext for smart rule selection
     """
-    if not root_path.is_dir():
-        raise FileNotFoundError(f"Root path is not a directory: {root_path}")
+    if not root_path.exists():
+        raise FileNotFoundError(f"Path not found: {root_path}")
 
     try:
         root_path = root_path.resolve()

@@ -1,0 +1,14 @@
+# Example pre-commit configuration for impact-scan
+# Copy this to your project root as .pre-commit-config.yaml
+# Then run: pre-commit install
+
+repos:
+  - repo: local
+    hooks:
+      - id: impact-scan
+        name: Impact-Scan Security Check
+        entry: impact-scan scan-staged --fail-on high
+        language: system
+        pass_filenames: false
+        always_run: true
+        verbose: true
