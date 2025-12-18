@@ -115,6 +115,10 @@ addopts = "-ra -q"
 testpaths = [
     "tests",
 ]
+norecursedirs = [
+    "hexa",
+]
+
 pythonpath = "src"
 
 [tool.pytest_anyio]

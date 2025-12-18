@@ -146,7 +146,13 @@ dist/
 *.sarif
 *_scan.json
 *_scan.html
-*_report.*
+*_scan.html
+*_report.html
+*_report.json
+*_report.md
+*_report.sarif
+*_report.xml
+
 test_*.json
 demo_*.json
 

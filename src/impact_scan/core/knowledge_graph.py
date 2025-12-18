@@ -12,10 +12,10 @@ from 60-80% down to <10%.
 """
 
 import logging
-import re
+import ast
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Union, Any
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +25,37 @@ class FunctionMetadata:
     """Metadata about a function in the codebase."""
     name: str
     file_path: str
+    node: Optional[ast.FunctionDef] = None
     sanitizes: List[str] = field(default_factory=list)  # What vulns it prevents
     dangerous: bool = False
     safe_contexts: List[str] = field(default_factory=list)
     risky_contexts: List[str] = field(default_factory=list)
+    start_line: int = 0
+    end_line: int = 0
+    is_async: bool = False
+    decorators: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ClassMetadata:
+    """Metadata about a class in the codebase."""
+    name: str
+    file_path: str
+    node: Optional[ast.ClassDef] = None
+    base_classes: List[str] = field(default_factory=list)
+    methods: Dict[str, FunctionMetadata] = field(default_factory=dict)
+    start_line: int = 0
+    end_line: int = 0
+
+
+@dataclass
+class ImportMetadata:
+    """Metadata about an import."""
+    module: str
+    names: List[str]
+    file_path: str
+    line_number: int
+    as_names: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -38,6 +65,9 @@ class FileMetadata:
     file_type: str  # production, test, example, config, cli_tool
     risk_level: str  # high, medium, low, ignore
     framework_hints: List[str] = field(default_factory=list)
+    imports: List[ImportMetadata] = field(default_factory=list)
+    classes: Dict[str, ClassMetadata] = field(default_factory=dict)
+    functions: Dict[str, FunctionMetadata] = field(default_factory=dict)
 
 
 @dataclass
@@ -52,12 +82,11 @@ class CodePattern:
 class KnowledgeGraph:
     """
     Context-aware knowledge graph of the codebase.
-
-    Builds understanding of:
-    1. Framework-specific safe functions (Flask url_for, Django escape, etc.)
-    2. File classification (prod vs test vs examples)
-    3. Code patterns and their safety
-    4. Function call chains and data flow
+    
+    Now powered by AST analysis for deep understanding of:
+    1. Structure (Classes, Functions, Imports)
+    2. Data Flow (Variable tracking - future)
+    3. Safety Context (Framework patterns, test files)
     """
 
     def __init__(self, root_path: Path, project_context=None):
@@ -65,9 +94,13 @@ class KnowledgeGraph:
         self.project_context = project_context
 
         # Knowledge stores
-        self.functions: Dict[str, FunctionMetadata] = {}
+        self.functions: Dict[str, FunctionMetadata] = {}  # Global function index
+        self.classes: Dict[str, ClassMetadata] = {}       # Global class index
         self.files: Dict[str, FileMetadata] = {}
         self.patterns: List[CodePattern] = []
+
+        # Framework-specific knowledge
+        self.framework_safe_functions = self._load_framework_knowledge()
 
         # Framework-specific knowledge
         self.framework_safe_functions = self._load_framework_knowledge()
@@ -254,6 +287,91 @@ class KnowledgeGraph:
         }
 
 
+    def add_function(self, node: ast.FunctionDef, file_path: str):
+        """Register a function definition from AST."""
+        # Get decorators
+        decorators = []
+        for d in node.decorator_list:
+            if isinstance(d, ast.Name):
+                decorators.append(d.id)
+            elif isinstance(d, ast.Call) and isinstance(d.func, ast.Name):
+                decorators.append(d.func.id)
+            elif isinstance(d, ast.Attribute):
+                # Handle @app.route etc. via recursive attribute lookup if needed
+                # For now just capture the attr name
+                decorators.append(d.attr)
+
+        meta = FunctionMetadata(
+            name=node.name,
+            file_path=file_path,
+            node=node,
+            start_line=node.lineno,
+            end_line=node.end_lineno or node.lineno,
+            is_async=isinstance(node, ast.AsyncFunctionDef),
+            decorators=decorators
+        )
+        
+        # Add to global index (qualified name logic can be added later)
+        # For now, just name collision handling? Or simple map?
+        # Using "filname::funcname" as key might be better, but "funcname" allows lookup by name.
+        # We'll store by simple name for now, assuming unique lookup isn't critical yet or handled elsewhere.
+        self.functions[node.name] = meta
+        
+        # Add to file metadata
+        if file_path in self.files:
+            self.files[file_path].functions[node.name] = meta
+
+    def add_class(self, node: ast.ClassDef, file_path: str):
+        """Register a class definition from AST."""
+        base_classes = []
+        for base in node.bases:
+            if isinstance(base, ast.Name):
+                base_classes.append(base.id)
+            elif isinstance(base, ast.Attribute):
+                base_classes.append(base.attr)
+        
+        meta = ClassMetadata(
+            name=node.name,
+            file_path=file_path,
+            node=node,
+            base_classes=base_classes,
+            start_line=node.lineno,
+            end_line=node.end_lineno or node.lineno
+        )
+        
+        self.classes[node.name] = meta
+        if file_path in self.files:
+            self.files[file_path].classes[node.name] = meta
+
+    def add_import(self, node: Union[ast.Import, ast.ImportFrom], file_path: str):
+        """Register an import from AST."""
+        if file_path not in self.files:
+            return
+            
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                imp = ImportMetadata(
+                    module=alias.name,
+                    names=[alias.name],
+                    file_path=file_path,
+                    line_number=node.lineno,
+                    as_names={alias.name: alias.asname} if alias.asname else {}
+                )
+                self.files[file_path].imports.append(imp)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            names = [alias.name for alias in node.names]
+            as_names = {alias.name: alias.asname for alias in node.names if alias.asname}
+            
+            imp = ImportMetadata(
+                module=module,
+                names=names,
+                file_path=file_path,
+                line_number=node.lineno,
+                as_names=as_names
+            )
+            self.files[file_path].imports.append(imp)
+
 def build_knowledge_graph(root_path: Path, project_context=None) -> KnowledgeGraph:
     """
     Build a knowledge graph for the codebase.
@@ -268,3 +386,4 @@ def build_knowledge_graph(root_path: Path, project_context=None) -> KnowledgeGra
     kg = KnowledgeGraph(root_path, project_context)
     kg.build()
     return kg
+
