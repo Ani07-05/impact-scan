@@ -3,14 +3,14 @@ TUI (Terminal User Interface) module for Impact Scan.
 Provides interactive terminal interface for security scanning.
 
 Available Interface:
-- UltraModernTUI: Ultra-modern, minimal TUI inspired by OpenTUI
-- Full support for OpenAI, Anthropic, and Gemini AI providers
+- ModernImpactScanTUI: Beautiful TUI with animated ASCII art banner
+- Full support for OpenAI, Anthropic, Gemini, and Groq AI providers
 - Real-time progress tracking and immediate visual feedback
-- Professional grid layout with working components
-- Web mode support (runs in browser!)
+- Professional tabbed layout with overview, findings, and reports
+- Animated IMPACT SCAN logo on startup
 """
 
-from .app import UltraModernTUI as ImpactScanTUI
-from .app import run_ultra_modern_tui as run_tui
+from .modern_app import ModernImpactScanTUI as ImpactScanTUI
+from .modern_app import run_modern_tui as run_tui
 
 __all__ = ["ImpactScanTUI", "run_tui"]

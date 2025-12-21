@@ -1,0 +1,545 @@
+rules:
+  # ============================================================================
+  # Authentication & Session Management Security
+  # ============================================================================
+
+  # CRITICAL: Plaintext Password Storage
+  - id: auth-plaintext-password-storage
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  user.password = $PASSWORD
+              - pattern-not: |
+                  user.password = hash_password(...)
+              - pattern-not: |
+                  user.password = bcrypt.hashpw(...)
+              - pattern-not: |
+                  user.password = argon2.hash(...)
+          - patterns:
+              - pattern: |
+                  db.query("INSERT INTO users (..., password) VALUES (..., ?)", (..., password, ...))
+              - pattern-not: |
+                  db.query("INSERT INTO users (..., password) VALUES (..., ?)", (..., hash_password(password), ...))
+    message: |
+      CRITICAL: Password stored in plaintext without hashing.
+      
+      Risk: If database is breached, all user passwords are immediately compromised.
+      Passwords MUST be hashed with salt using a cryptographically secure algorithm.
+      
+      Fix (Python with Argon2):
+        from argon2 import PasswordHasher
+        
+        ph = PasswordHasher()
+        
+        # When registering user
+        hashed = ph.hash(password)
+        user.password = hashed  # Store only hash
+        
+        # When authenticating
+        try:
+            ph.verify(hashed, provided_password)
+            # Password matches
+        except argon2.exceptions.VerifyMismatchError:
+            raise InvalidPassword()
+      
+      Fix (Node.js with bcrypt):
+        const bcrypt = require('bcrypt');
+        
+        // Register
+        const salt = await bcrypt.genSalt(12);
+        const hashed = await bcrypt.hash(password, salt);
+        user.password = hashed;  // Store only hash
+        
+        // Authenticate
+        const match = await bcrypt.compare(providedPassword, user.password);
+        if (!match) throw new Error('Invalid password');
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-256: Plaintext Storage of Password"
+      owasp: "A02:2021 - Cryptographic Failures"
+      cvss: "9.8"
+
+  # HIGH: Weak Password Hashing Algorithm
+  - id: auth-weak-password-hash
+    patterns:
+      - pattern-either:
+          - pattern: |
+              hashlib.md5($PASSWORD)
+          - pattern: |
+              hashlib.sha1($PASSWORD)
+          - pattern: |
+              hashlib.sha256($PASSWORD)
+          - pattern: |
+              hash('md5', $PASSWORD)
+          - pattern: |
+              hash('sha1', $PASSWORD)
+          - pattern: |
+              crypto.createHash('md5')
+          - pattern: |
+              crypto.createHash('sha1')
+    message: |
+      HIGH: Weak password hashing algorithm used (MD5, SHA1, SHA256).
+      
+      Risk: These algorithms are fast, making them susceptible to brute-force attacks.
+      Passwords should use slow, memory-hard algorithms with salt.
+      
+      Recommended algorithms:
+        - Argon2id (OWASP recommended)
+        - bcrypt (10+ rounds minimum)
+        - scrypt
+        - PBKDF2 (minimum 100,000 iterations)
+      
+      Fix (Argon2):
+        from argon2 import PasswordHasher
+        
+        ph = PasswordHasher()
+        hashed = ph.hash(password)
+        
+      Fix (bcrypt - minimum acceptable):
+        import bcrypt
+        salt = bcrypt.gensalt(rounds=12)
+        hashed = bcrypt.hashpw(password.encode(), salt)
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-326: Inadequate Encryption Strength"
+      owasp: "A02:2021 - Cryptographic Failures"
+
+  # HIGH: Session Fixation Vulnerability
+  - id: auth-session-fixation-no-regeneration
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  def login(username, password):
+                      user = authenticate(username, password)
+                      session['user_id'] = user.id
+                      return redirect('/dashboard')
+              - pattern-not: |
+                  session.regenerate()
+              - pattern-not: |
+                  request.session.cycle_key()
+          - patterns:
+              - pattern: |
+                  app.post('/login', (req, res) => {
+                    const user = authenticate(req.body);
+                    req.session.user_id = user.id;
+                    res.redirect('/dashboard');
+                  })
+              - pattern-not: |
+                  req.session.regenerate(...)
+    message: |
+      HIGH: Session not regenerated after login (session fixation vulnerability).
+      
+      Risk: If attacker tricks user into using a pre-set session ID, the session
+      ID remains the same after login. Attacker can use that ID to hijack the
+      authenticated session.
+      
+      Attack:
+        1. Attacker creates session: GET /login (receives sessionid=ABC123)
+        2. Attacker tricks user into clicking: /login?sessionid=ABC123
+        3. User logs in with sessionid=ABC123
+        4. Session ID never changes - attacker can use ABC123 as authenticated user
+      
+      Fix (Flask):
+        from flask import session
+        
+        @app.route('/login', methods=['POST'])
+        def login():
+            username = request.form.get('username')
+            password = request.form.get('password')
+            
+            user = User.authenticate(username, password)
+            if not user:
+                return 'Invalid credentials', 401
+            
+            # CRITICAL: Regenerate session ID
+            session.clear()
+            session['user_id'] = user.id
+            
+            return redirect('/dashboard')
+      
+      Fix (Express):
+        app.post('/login', (req, res) => {
+          const user = User.authenticate(req.body);
+          if (!user) return res.status(401).send('Invalid');
+          
+          // CRITICAL: Regenerate session
+          req.session.regenerate((err) => {
+            if (err) return res.status(500).send('Server error');
+            req.session.user_id = user.id;
+            res.redirect('/dashboard');
+          });
+        });
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-384: Session Fixation"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+      cvss: "7.5"
+
+  # HIGH: Missing CSRF Token Validation
+  - id: auth-missing-csrf-token
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  @app.route('/password/change', methods=['POST'])
+                  def change_password():
+                      old_pwd = request.form.get('old_password')
+              - pattern-not: |
+                  csrf_token = request.form.get('csrf_token')
+              - pattern-not: |
+                  if csrf_token != session.get('csrf_token'):
+          - patterns:
+              - pattern: |
+                  app.post('/password/change', (req, res) => {
+                    const oldPwd = req.body.old_password;
+              - pattern-not: |
+                  const csrfToken = req.body.csrf_token;
+              - pattern-not: |
+                  if (csrfToken !== req.session.csrf_token)
+    message: |
+      HIGH: Form submission missing CSRF token validation.
+      
+      Risk: Attackers can trick authenticated users into submitting forms
+      from attacker-controlled pages, performing unauthorized actions
+      (change password, transfer funds, delete data).
+      
+      Attack:
+        1. User logs into your banking website
+        2. Without closing tab, user visits attacker.com
+        3. attacker.com contains: <form action="bank.com/transfer" method="POST">
+        4. User's browser automatically sends authenticated cookies
+        5. Transfer is executed without user knowledge
+      
+      Fix (Flask):
+        from flask_wtf.csrf import CSRFProtect, generate_csrf
+        
+        csrf = CSRFProtect(app)
+        
+        @app.route('/password/change', methods=['GET'])
+        def change_password_form():
+            return render_template('change_password.html', csrf_token=generate_csrf())
+        
+        @app.route('/password/change', methods=['POST'])
+        @csrf.protect
+        def change_password():
+            # CSRF token automatically validated by decorator
+            old_pwd = request.form.get('old_password')
+            new_pwd = request.form.get('new_password')
+            
+            user = current_user()
+            if not user.check_password(old_pwd):
+                return 'Invalid password', 401
+            
+            user.set_password(new_pwd)
+            db.commit()
+            return 'Password changed'
+      
+      HTML Template:
+        <form method="POST" action="/password/change">
+          {{ csrf_token() }}
+          <input type="password" name="old_password">
+          <input type="password" name="new_password">
+          <button>Change Password</button>
+        </form>
+    severity: ERROR
+    languages: [python, javascript, typescript, php]
+    metadata:
+      category: security
+      cwe: "CWE-352: Cross-Site Request Forgery (CSRF)"
+      owasp: "A01:2021 - Broken Access Control"
+      cvss: "6.5"
+
+  # MEDIUM: Insufficient Session Timeout
+  - id: auth-session-timeout-too-long
+    patterns:
+      - pattern-either:
+          - pattern: |
+              session.permanent = True
+              app.permanent_session_lifetime = timedelta(days=30)
+          - pattern: |
+              SESSION_LIFETIME = 86400 * 30  # 30 days
+          - pattern: |
+              max_age: 2592000  # 30 days in seconds
+          - pattern: |
+              'maxAge': 2592000
+    message: |
+      MEDIUM: Session timeout configured too long (30+ days).
+      
+      Risk: Long session timeouts increase the window for session hijacking attacks.
+      If a session token is compromised, attacker has extended access.
+      
+      Recommended timeouts:
+        - Sensitive operations (banking, admin): 5-15 minutes
+        - Regular user sessions: 1-4 hours
+        - Remember-me tokens (if used): 7-30 days with refresh requirement
+      
+      Fix (Flask):
+        from datetime import timedelta
+        
+        # Regular session: 1 hour
+        app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
+        
+        # Or per-request basis
+        @app.before_request
+        def before_request():
+            session.permanent = True
+            app.permanent_session_lifetime = timedelta(hours=1)
+      
+      Fix (Express):
+        app.use(session({
+          secret: process.env.SESSION_SECRET,
+          cookie: {
+            maxAge: 3600000,  // 1 hour in milliseconds
+            secure: true,
+            httpOnly: true,
+            sameSite: 'strict'
+          }
+        }));
+    severity: WARNING
+    languages: [python, javascript, typescript, php]
+    metadata:
+      category: security
+      cwe: "CWE-613: Insufficient Session Expiration"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+
+  # HIGH: Timing Attack on Password Comparison
+  - id: auth-timing-attack-password
+    patterns:
+      - pattern-either:
+          - pattern: |
+              if password == stored_password:
+          - pattern: |
+              if user.password === providedPassword:
+          - pattern: |
+              if (strcmp($password, $stored) == 0)
+    message: |
+      HIGH: Using direct string comparison for password validation (timing attack).
+      
+      Risk: Direct comparison (==, ===, strcmp) takes different time based on
+      where strings differ. Attackers can use timing measurements to guess
+      correct characters one by one.
+      
+      Fix (Python):
+        import secrets
+        
+        def verify_password(stored_hash, provided_password):
+            # bcrypt.checkpw() uses timing-safe comparison internally
+            return bcrypt.checkpw(
+                provided_password.encode(),
+                stored_hash
+            )
+      
+      Fix (Node.js):
+        const crypto = require('crypto');
+        
+        function verifyPassword(storedHash, providedPassword) {
+          // Use timing-safe comparison
+          return crypto.timingSafeEqual(
+            Buffer.from(storedHash),
+            Buffer.from(hashedProvidedPassword)
+          );
+        }
+      
+      Or use library that does this:
+        const bcrypt = require('bcrypt');
+        await bcrypt.compare(providedPassword, storedHash);
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-208: Observable Timing Discrepancy"
+      owasp: "A02:2021 - Cryptographic Failures"
+
+  # CRITICAL: Multi-Factor Authentication Bypass
+  - id: auth-mfa-missing-validation
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  if authenticate(username, password):
+                      session['user_id'] = user.id
+                      return redirect('/dashboard')
+              - pattern-not: |
+                  if user.mfa_enabled:
+              - pattern-not: |
+                  return redirect('/mfa/verify')
+          - patterns:
+              - pattern: |
+                  def verify_mfa_code(code):
+                      if mfa_code_valid(code):
+                          return True
+              - pattern-not: |
+                  if code in used_codes:
+    message: |
+      CRITICAL: Multi-factor authentication not enforced or MFA codes reused.
+      
+      Risk: If MFA is optional, users don't use it. If MFA codes are reusable,
+      attackers can replay codes to bypass MFA.
+      
+      Fix - Mandatory MFA:
+        @app.route('/login', methods=['POST'])
+        def login():
+            username = request.form.get('username')
+            password = request.form.get('password')
+            
+            user = User.authenticate(username, password)
+            if not user:
+                return 'Invalid credentials', 401
+            
+            # Check if user has MFA enabled
+            if user.mfa_enabled:
+                # Don't set user_id yet - temporary session only
+                session['mfa_pending_user_id'] = user.id
+                return redirect('/mfa/verify')
+            
+            # MFA not enabled - set full session
+            session['user_id'] = user.id
+            return redirect('/dashboard')
+      
+      Fix - MFA Code Validation (prevent reuse):
+        def verify_mfa_code(user_id, code):
+            mfa_key = user.mfa_key
+            
+            # Get time window
+            totp = pyotp.TOTP(mfa_key)
+            
+            # Check current and recent codes (allow for clock skew)
+            if totp.verify(code, valid_window=1):
+                # Prevent code reuse - store used codes with timestamp
+                redis.set(
+                    f"used_mfa_code:{user_id}:{code}",
+                    "used",
+                    ex=30  # Expire after MFA time window
+                )
+                return True
+            
+            # Check if code was already used
+            if redis.exists(f"used_mfa_code:{user_id}:{code}"):
+                raise MFACodeReused("Code already used")
+            
+            return False
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-287: Improper Authentication"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+      cvss: "9.8"
+
+  # HIGH: No Account Lockout After Failed Logins
+  - id: auth-no-account-lockout
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  def login():
+                      if not authenticate(username, password):
+                          return 'Invalid credentials', 401
+              - pattern-not: |
+                  if increment_failed_attempts(username) > MAX_ATTEMPTS:
+              - pattern-not: |
+                  lock_account(username)
+    message: |
+      HIGH: No account lockout mechanism after failed login attempts.
+      
+      Risk: Attackers can perform unlimited brute-force password guessing attacks
+      without any friction or delay.
+      
+      Fix:
+        from datetime import datetime, timedelta
+        import redis
+        
+        MAX_LOGIN_ATTEMPTS = 5
+        LOCKOUT_DURATION = 15 * 60  # 15 minutes
+        
+        def login(username, password):
+            # Check if account is locked
+            lock_key = f"account_lock:{username}"
+            if redis.exists(lock_key):
+                remaining = redis.ttl(lock_key)
+                return f'Account locked. Try again in {remaining} seconds', 429
+            
+            # Authenticate
+            user = User.query.filter_by(username=username).first()
+            
+            if not user or not user.verify_password(password):
+                # Increment failed attempts
+                attempts_key = f"failed_attempts:{username}"
+                attempts = redis.incr(attempts_key)
+                redis.expire(attempts_key, 3600)  # Reset daily
+                
+                if attempts >= MAX_LOGIN_ATTEMPTS:
+                    # Lock account
+                    redis.setex(lock_key, LOCKOUT_DURATION, '1')
+                    return 'Account locked due to too many failed attempts', 429
+                
+                return f'Invalid credentials ({MAX_LOGIN_ATTEMPTS - attempts} attempts remaining)', 401
+            
+            # Successful login - clear attempts
+            redis.delete(f"failed_attempts:{username}")
+            
+            session['user_id'] = user.id
+            return redirect('/dashboard')
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-307: Improper Restriction of Rendered UI Layers or Frames"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+
+  # MEDIUM: Sensitive Session Data in URL
+  - id: auth-session-token-in-url
+    patterns:
+      - pattern-either:
+          - pattern: |
+              redirect(f"...?session_id={session_id}...")
+          - pattern: |
+              f"...?auth_token={token}..."
+          - pattern: |
+              `...?sessionId=${sessionId}...`
+    message: |
+      MEDIUM: Session token passed in URL parameters.
+      
+      Risk: URLs are logged in:
+        - Browser history
+        - Web server logs
+        - Proxy logs
+        - Referrer headers
+      
+      Session tokens MUST be passed in cookies or Authorization headers only.
+      
+      Fix (use cookies instead):
+        response = make_response(redirect('/dashboard'))
+        response.set_cookie(
+            'session_id',
+            session_id,
+            httponly=True,
+            secure=True,
+            samesite='strict'
+        )
+        return response
+      
+      Or use Authorization header (API):
+        return {
+            'access_token': token,
+            'token_type': 'Bearer'
+        }
+        
+        // Client sends in header
+        fetch('/api/profile', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        })
+    severity: WARNING
+    languages: [python, javascript, typescript, php]
+    metadata:
+      category: security
+      cwe: "CWE-598: Use of GET Request Method with Sensitive Query Strings"
+      owasp: "A01:2021 - Broken Access Control"

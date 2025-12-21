@@ -2,12 +2,13 @@
 Simplified CLI interface for Impact Scan with smart defaults and profiles.
 """
 
+import asyncio
 import logging
 import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 import typer
 from rich.console import Console
@@ -195,6 +196,16 @@ def scan_command(
         20,
         "--ai-audit-max-files",
         help="Maximum files to audit with AI deep scan (cost control)",
+    ),
+    no_semgrep: bool = typer.Option(
+        False,
+        "--no-semgrep",
+        help="Skip Semgrep and use only AST-based scanning (faster, self-contained)",
+    ),
+    ai_flow: bool = typer.Option(
+        False,
+        "--ai-flow",
+        help="Enable AI-powered code flow analysis (finds logic bugs & auth issues)",
     ),
     verbose: bool = typer.Option(
         False,
@@ -465,7 +476,41 @@ def scan_command(
             )
 
         # Core scanning
-        scan_result = entrypoint.run_scan(config)
+        if no_semgrep or ai_flow:
+            all_findings = []
+
+            if no_semgrep:
+                # AST-only scanning mode
+                console.print("[cyan]Running AST-based scan (Semgrep bypassed)...[/cyan]")
+                from impact_scan.core.ast_scanner import scan_directory_with_ast
+
+                ast_findings = scan_directory_with_ast(config.root_path)
+                all_findings.extend(ast_findings)
+                console.print(f"[green]AST scan:[/green] {len(ast_findings)} findings")
+
+            if ai_flow:
+                # AI flow analysis mode
+                console.print("[bold cyan]Running AI-powered flow analysis...[/bold cyan]")
+                console.print("[dim]Using Groq to find logic bugs & auth vulnerabilities[/dim]")
+                from impact_scan.core.ai_flow_analyzer import AIFlowAnalyzer
+
+                analyzer = AIFlowAnalyzer(api_key=config.api_keys.groq)
+                ai_findings = analyzer.analyze_auth_flow(config.root_path)
+                all_findings.extend(ai_findings)
+                console.print(f"[green]AI flow analysis:[/green] {len(ai_findings)} vulnerabilities found")
+
+            # Create scan result
+            scan_result = schema.ScanResult(
+                config=config,
+                findings=all_findings,
+                entry_points=[],  # AST/AI scan doesn't analyze entry points
+                timestamp=time.time(),
+                scan_duration=time.time() - start_time,
+                scanned_files=len(set(f.file_path for f in all_findings)) if all_findings else 0,
+            )
+        else:
+            # Normal Semgrep-based scanning
+            scan_result = entrypoint.run_scan(config)
 
 
         # Display knowledge graph tree visualization (post-scan summary)
@@ -1170,27 +1215,122 @@ def check_config():
 
 @app.command("init")
 def init_config(
+    path: Path = typer.Argument(
+        ".",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        help="Repository path to analyze (default: current directory)",
+    ),
     config_type: str = typer.Option(
         "yaml", "--type", "-t", help="Configuration file type: yaml, toml"
     ),
+    analyze: bool = typer.Option(
+        True,
+        "--analyze/--no-analyze",
+        help="Analyze repository and generate custom rules",
+    ),
+    github_actions: bool = typer.Option(
+        False,
+        "--github-actions",
+        help="Also initialize GitHub Actions workflow",
+    ),
 ):
-    """Initialize a configuration file for your project."""
+    """
+    Initialize impact-scan for your repository.
+
+    Analyzes your codebase, detects languages, frameworks, and secrets.
+    Generates custom security rules and an impact-scan.md configuration file.
+    """
+    from impact_scan.core.repo_analyzer import RepoAnalyzer
+
+    path = path.resolve()
+    console.print(f"\n[bold cyan]🔍 Initializing impact-scan for:[/bold cyan] {path}\n")
+
+    # Step 1: Analyze repository
+    analysis_result = None
+    analyzer = None
+    custom_rules = []
+    
+    if analyze:
+        console.print("[bold]Step 1:[/bold] Analyzing repository...")
+
+        analyzer = RepoAnalyzer(path)
+        analysis_result = analyzer.analyze()
+
+        # Display analysis results
+        console.print(f"  [green]✓[/green] Detected [cyan]{len(analysis_result['languages'])}[/cyan] language(s)")
+        console.print(f"  [green]✓[/green] Primary language: [cyan]{analysis_result['primary_language']}[/cyan]")
+
+        if analysis_result['frameworks']:
+            console.print(f"  [green]✓[/green] Frameworks: [cyan]{', '.join(analysis_result['frameworks'])}[/cyan]")
+
+        console.print(f"  [green]✓[/green] Scanned [cyan]{analysis_result['total_files']}[/cyan] files")
+        
+        # Display secrets found
+        secrets = analysis_result.get('secrets_found', [])
+        if secrets:
+            console.print(f"\n  [bold red]⚠️  SECRETS DETECTED: {len(secrets)} exposed secrets found![/bold red]")
+            
+            # Group by severity
+            critical_secrets = [s for s in secrets if s['severity'] == 'CRITICAL']
+            high_secrets = [s for s in secrets if s['severity'] == 'HIGH']
+            
+            if critical_secrets:
+                console.print(f"    [red]• CRITICAL: {len(critical_secrets)}[/red]")
+                for secret in critical_secrets[:5]:
+                    console.print(f"      - {secret['type']} in [yellow]{secret['file']}[/yellow] line {secret['line']}")
+                if len(critical_secrets) > 5:
+                    console.print(f"      ... and {len(critical_secrets) - 5} more")
+            
+            if high_secrets:
+                console.print(f"    [orange1]• HIGH: {len(high_secrets)}[/orange1]")
+        else:
+            console.print(f"  [green]✓[/green] No exposed secrets detected")
+        
+        console.print()
+
+    # Step 2: Generate impact-scan.md
+    console.print("[bold]Step 2:[/bold] Generating impact-scan.md...")
+    
+    if analyzer and analysis_result:
+        md_path = path / "impact-scan.md"
+        if md_path.exists():
+            console.print(f"  [yellow]Note: impact-scan.md already exists[/yellow]")
+            if typer.confirm("  Overwrite existing file?"):
+                md_content = analyzer.generate_impact_scan_md(analysis_result)
+                md_path.write_text(md_content, encoding="utf-8")
+                console.print(f"  [green]✓[/green] Updated: [cyan]{md_path}[/cyan]")
+            else:
+                console.print("  Skipped impact-scan.md update")
+        else:
+            md_content = analyzer.generate_impact_scan_md(analysis_result)
+            md_path.write_text(md_content, encoding="utf-8")
+            console.print(f"  [green]✓[/green] Created: [cyan]{md_path}[/cyan]")
+    
+    console.print()
+
+    # Step 3: Create .impact-scan.yml configuration file
+    console.print("[bold]Step 3:[/bold] Creating configuration file...")
 
     if config_type.lower() == "yaml":
-        config_path = Path(".impact-scan.yml")
+        config_path = path / ".impact-scan.yml"
         if config_path.exists():
             console.print(
-                f"[yellow]WARNING: Configuration file already exists: {config_path}[/yellow]"
+                f"  [yellow]Note: Configuration file already exists: {config_path}[/yellow]"
             )
-            if not typer.confirm("Overwrite existing file?"):
-                console.print("Cancelled")
-                return
-
-        config_file.save_sample_config(config_path)
-        console.print(
-            f"[bold green]Created configuration file: {config_path}[/bold green]"
-        )
-        console.print("\nEdit the file to customize your scan settings.")
+            if not typer.confirm("  Overwrite existing file?"):
+                console.print("  Skipped config file")
+            else:
+                config_file.save_sample_config(config_path)
+                if analysis_result:
+                    _customize_config(config_path, analysis_result)
+                console.print(f"  [green]✓[/green] Updated: [cyan]{config_path}[/cyan]")
+        else:
+            config_file.save_sample_config(config_path)
+            if analysis_result:
+                _customize_config(config_path, analysis_result)
+            console.print(f"  [green]✓[/green] Created: [cyan]{config_path}[/cyan]")
 
     elif config_type.lower() == "toml":
         console.print(
@@ -1203,6 +1343,186 @@ def init_config(
             f"[bold red]Error: Invalid config type '{config_type}'. Use 'yaml' or 'toml'.[/bold red]"
         )
         raise typer.Exit(code=1)
+
+    # Step 4: Generate custom rules with Groq AI
+    if analyze and analysis_result:
+        console.print("\n[bold]Step 4:[/bold] Generating custom security rules with Groq AI...")
+
+        # Check for Groq API key
+        api_keys = schema.APIKeys()
+        if not api_keys.groq:
+            console.print(f"  [yellow]⚠ Groq API key not found[/yellow]")
+            console.print(f"  [dim]Set GROQ_API_KEY environment variable to enable AI-powered rule generation[/dim]")
+            console.print(f"  [dim]Get a free key at: https://console.groq.com[/dim]")
+            console.print(f"  [yellow]Skipping custom rule generation[/yellow]")
+        else:
+            rules_dir = path / ".impact-scan" / "rules"
+            rules_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create minimal config for AI
+            class AIConfig:
+                def __init__(self):
+                    self.api_keys = api_keys
+                    self.ai_provider = 'groq'
+
+            ai_config = AIConfig()
+            custom_rules = asyncio.run(analyzer.generate_custom_rules(ai_config=ai_config))
+
+            if custom_rules:
+                rules_file = rules_dir / f"{analysis_result['primary_language']}-custom.yml"
+                _save_custom_rules(rules_file, custom_rules, analysis_result)
+                console.print(f"  [green]✓[/green] Generated [cyan]{len(custom_rules)}[/cyan] custom rules")
+                console.print(f"  [green]✓[/green] Saved to: [cyan]{rules_file}[/cyan]")
+            else:
+                console.print(f"  [yellow]No custom rules generated[/yellow]")
+
+    # Step 5: Initialize GitHub Actions if requested
+    if github_actions:
+        console.print("\n[bold]Step 5:[/bold] Setting up GitHub Actions...")
+
+        workflow_dir = path / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True, exist_ok=True)
+
+        workflow_file = workflow_dir / "impact-scan.yml"
+        if workflow_file.exists():
+            if not typer.confirm(f"Overwrite existing workflow {workflow_file}?"):
+                console.print("Skipped GitHub Actions setup")
+            else:
+                _create_github_workflow(workflow_file, analysis_result)
+                console.print(f"  [green]✓[/green] Created: [cyan]{workflow_file}[/cyan]")
+        else:
+            _create_github_workflow(workflow_file, analysis_result)
+            console.print(f"  [green]✓[/green] Created: [cyan]{workflow_file}[/cyan]")
+
+    # Summary
+    console.print("\n[bold green]✅ Initialization complete![/bold green]\n")
+    
+    # Show warnings if secrets were found
+    secrets = analysis_result.get('secrets_found', []) if analysis_result else []
+    if secrets:
+        console.print("[bold red]⚠️  IMPORTANT: Secrets were detected in your codebase![/bold red]")
+        console.print("   Review impact-scan.md for details and remediation steps.\n")
+    
+    console.print("[bold]Next steps:[/bold]")
+    console.print("  1. Review [cyan]impact-scan.md[/cyan] for project-specific security rules")
+    console.print("  2. Review [cyan].impact-scan.yml[/cyan] and customize as needed")
+    if custom_rules:
+        console.print("  3. Review generated custom rules in [cyan].impact-scan/rules/[/cyan]")
+    if secrets:
+        console.print(f"  [bold red]4. FIX {len(secrets)} exposed secrets immediately![/bold red]")
+    console.print(f"\n  Run your first scan: [cyan]impact-scan scan {path}[/cyan]")
+    console.print()
+
+
+def _customize_config(config_path: Path, analysis: Dict):
+    """Customize config file based on repository analysis."""
+    # This would add language-specific settings to the config
+    # For now, just add a comment with detected info
+    try:
+        content = config_path.read_text()
+        header = f"# Auto-detected: {analysis['primary_language']} project\n"
+        header += f"# Frameworks: {', '.join(analysis['frameworks']) if analysis['frameworks'] else 'None detected'}\n\n"
+        config_path.write_text(header + content)
+    except Exception as e:
+        logger.debug(f"Could not customize config: {e}")
+
+
+def _save_custom_rules(rules_file: Path, rules: List[Dict], analysis: Dict):
+    """Save custom rules to YAML file."""
+    import yaml
+
+    rule_content = {
+        "# Custom rules generated for this repository": None,
+        "# Language": analysis['primary_language'],
+        "# Frameworks": ', '.join(analysis['frameworks']) if analysis['frameworks'] else 'None',
+        "rules": rules,
+    }
+
+    with open(rules_file, 'w') as f:
+        f.write(f"# Custom Impact-Scan Rules\n")
+        f.write(f"# Generated for: {analysis['primary_language']} project\n")
+        f.write(f"# Frameworks: {', '.join(analysis['frameworks']) if analysis['frameworks'] else 'None'}\n\n")
+
+        for rule in rules:
+            f.write(f"# {rule['name']}\n")
+            f.write(f"#   Severity: {rule['severity']}\n")
+            f.write(f"#   Description: {rule['description']}\n")
+            f.write(f"#   Pattern: {rule['pattern']}\n")
+            f.write(f"#   Enabled: {rule['enabled']}\n\n")
+
+
+def _create_github_workflow(workflow_file: Path, analysis: Dict):
+    """Create GitHub Actions workflow file."""
+    primary_lang = analysis.get('primary_language', 'python') if analysis else 'python'
+
+    workflow = f"""name: Impact-Scan Security Analysis
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sunday
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  security-scan:
+    name: Run Impact-Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Impact-Scan
+        run: |
+          pip install impact-scan
+
+      - name: Run Security Scan
+        env:
+          GROQ_API_KEY: ${{{{ secrets.GROQ_API_KEY }}}}
+        run: |
+          impact-scan scan . \\
+            --profile standard \\
+            --output-format sarif,markdown \\
+            --output impact-scan-results \\
+            --min-severity medium
+
+      - name: Upload SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: impact-scan-results.sarif
+
+      - name: Comment PR with Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            try {{
+              const report = fs.readFileSync('impact-scan-results.md', 'utf8');
+              await github.rest.issues.createComment({{
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: report.substring(0, 60000)
+              }});
+            }} catch (error) {{
+              console.log('No markdown report found');
+            }}
+"""
+
+    workflow_file.write_text(workflow)
 
 
 @app.command("agent-scan")
@@ -2012,6 +2332,23 @@ def start_command():
         raise typer.Exit(code=1)
 
 
+@app.command("onboard")
+def onboard_command():
+    """
+    Run the beautiful TUI onboarding experience.
+
+    Interactive setup wizard to configure API keys and get started.
+    """
+    try:
+        from impact_scan.tui.onboarding import run_onboarding
+        run_onboarding()
+    except ImportError as e:
+        console.print(f"[red]Error: TUI dependencies not available: {e}[/red]")
+        console.print("[yellow]Install with: pip install impact-scan[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Error running onboarding: {e}[/red]")
+
+
 @app.command("setup")
 def init_command(
     skip_install: bool = typer.Option(
@@ -2185,6 +2522,114 @@ password = "admin123"
     console.print(
         "[dim]Documentation: https://github.com/Ani07-05/impact-scan#readme[/dim]"
     )
+
+
+@app.command()
+def init_repo(
+    path: Path = typer.Argument(
+        ".",
+        exists=True,
+        dir_okay=True,
+        file_okay=False,
+        readable=True,
+        resolve_path=True,
+        help="Repository path to analyze",
+    ),
+    api_key: Optional[str] = typer.Option(
+        None,
+        "--groq-key",
+        envvar="GROQ_API_KEY",
+        help="Groq API key (or set GROQ_API_KEY env var)",
+    ),
+):
+    """
+    Initialize repository analysis with Groq AI.
+    
+    Analyzes your codebase and generates:
+    - impact-scan.md: Detailed security analysis
+    - .impact-scan/custom-rules.yml: Custom security rules for your repo
+    
+    These custom rules are then used by `impact-scan scan` for targeted detection.
+    """
+    from impact_scan.core.groq_repo_analyzer import GroqRepoAnalyzer
+    
+    try:
+        console.print("\n[bold cyan]Impact-Scan Repository Analyzer[/bold cyan]")
+        console.print(f"[dim]Analyzing repository at: {path}[/dim]\n")
+        
+        if not api_key and not schema.APIKeys().groq:
+            console.print("[red]Error:[/red] Groq API key not found")
+            console.print("\nSet your Groq API key:")
+            console.print("  [cyan]export GROQ_API_KEY=your-key[/cyan]")
+            console.print("\nOr pass it via option:")
+            console.print("  [cyan]impact-scan init-repo --groq-key your-key[/cyan]")
+            console.print("\nGet a free API key at: [cyan]https://console.groq.com[/cyan]\n")
+            raise typer.Exit(code=1)
+        
+        analyzer = GroqRepoAnalyzer(path, api_key=api_key)
+        
+        console.print("[bold]Step 1/3:[/bold] Collecting codebase information...")
+        with console.status("[bold cyan]Scanning repository...", spinner="dots"):
+            codebase_info = analyzer.collect_codebase_info()
+        
+        console.print("[green]✓[/green] Codebase information collected\n")
+        
+        console.print("[bold]Step 2/3:[/bold] Analyzing with Groq AI...")
+        with console.status("[bold cyan]Analyzing security patterns...", spinner="dots"):
+            analysis = analyzer.analyze_with_groq(codebase_info)
+        
+        console.print("[green]✓[/green] Security analysis complete\n")
+        
+        console.print("[bold]Step 3/3:[/bold] Generating custom security rules...")
+        with console.status("[bold cyan]Generating rules...", spinner="dots"):
+            rules = analyzer.generate_custom_rules(analysis)
+        
+        console.print("[green]✓[/green] Custom rules generated\n")
+        
+        # Save files
+        analysis_file = path / "impact-scan.md"
+        rules_file = path / ".impact-scan" / "custom-rules.yml"
+        
+        analyzer._save_analysis_md(analysis_file, codebase_info, analysis)
+        rules_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(rules_file, 'w') as f:
+            f.write(rules)
+        
+        # Show results
+        console.print("[bold cyan]Files Created:[/bold cyan]")
+        console.print(f"  [green]✓[/green] {analysis_file.relative_to(path)}")
+        console.print(f"      Detailed codebase security analysis")
+        console.print(f"  [green]✓[/green] {rules_file.relative_to(path)}")
+        console.print(f"      Custom Semgrep rules for your codebase\n")
+        
+        console.print("[bold cyan]Next Steps:[/bold cyan]")
+        console.print("[dim]1. Review the analysis in:[/dim]")
+        console.print(f"   [cyan]cat {analysis_file}[/cyan]")
+        console.print("[dim]2. Run scan with custom rules:[/dim]")
+        console.print(f"   [cyan]impact-scan scan {path}[/cyan]")
+        console.print("[dim]3. View findings:[/dim]")
+        console.print("   [cyan]impact-scan scan . -o findings.html[/cyan]\n")
+        
+        # Show preview of analysis
+        console.print("[bold]Analysis Preview:[/bold]")
+        console.print("[dim]" + "─" * 60 + "[/dim]")
+        console.print(analysis[:800])
+        console.print("[dim]..." + "─" * 60 + "[/dim]\n")
+        
+        console.print("[green]✓ Repository initialization complete![/green]")
+        
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1)
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        console.print("\nInstall Groq client:")
+        console.print("  [cyan]pip install groq[/cyan]\n")
+        raise typer.Exit(code=1)
+    except Exception as e:
+        logger.exception("Analysis failed")
+        console.print(f"[red]Error:[/red] Analysis failed: {e}")
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

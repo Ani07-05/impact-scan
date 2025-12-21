@@ -1,0 +1,779 @@
+rules:
+  # ============================================================================
+  # OAuth 2.0 & OpenID Connect Vulnerabilities
+  # ============================================================================
+
+  # CRITICAL: Missing PKCE (Proof Key for Code Exchange)
+  - id: oauth-pkce-missing-desktop-mobile
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  authorization_url = $OAUTH_URL + "...client_id=..." 
+              - pattern-not: |
+                  authorization_url = $OAUTH_URL + "...code_challenge..."
+              - pattern-not: |
+                  authorization_url = $OAUTH_URL + "...S256..."
+          - patterns:
+              - pattern: |
+                  redirect_url = urllib.parse.urlparse($URL)
+              - pattern-not: |
+                  code_challenge = hashlib.sha256(...).digest()
+    message: |
+      CRITICAL: OAuth 2.0 authorization request missing PKCE parameters.
+      
+      Risk (CVE-2022-43996, CVE-2023-47045): Authorization code intercept attack.
+      In public client applications (mobile, desktop, SPAs), the authorization code
+      can be intercepted via a malicious redirect. Without PKCE, attackers can exchange
+      the code for access tokens.
+      
+      Vulnerable Pattern:
+        Authorization URL without code_challenge parameter
+        No SHA256 hash of random code_verifier
+      
+      Fix (RFC 7636):
+        code_verifier = secrets.token_urlsafe(128)[:128]
+        code_challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(code_verifier.encode()).digest()
+        ).decode().rstrip('=')
+        
+        auth_url = f"{oauth_endpoint}?client_id={client_id}&code_challenge={code_challenge}&code_challenge_method=S256&..."
+        
+        # Exchange code for token:
+        token_response = requests.post(token_endpoint, data={
+            'code': authorization_code,
+            'code_verifier': code_verifier,  # MUST be included
+            'client_id': client_id
+        })
+    severity: ERROR
+    languages: [python, javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-295: Improper Certificate Validation"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+      cvss: "7.4"
+      references:
+        - "https://datatracker.ietf.org/doc/html/rfc7636"
+        - "https://nvd.nist.gov/vuln/detail/CVE-2022-43996"
+
+  # CRITICAL: Insufficient Redirect URI Validation
+  - id: oauth-redirect-uri-not-whitelisted
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  redirect_uri = request.args.get("redirect_uri")
+              - pattern-not: |
+                  if redirect_uri not in ALLOWED_REDIRECTS:
+              - pattern-not: |
+                  if not is_valid_redirect_uri(redirect_uri):
+              - pattern-not: |
+                  if not redirect_uri.startswith(TRUSTED_DOMAIN):
+          - patterns:
+              - pattern: |
+                  const redirectUri = req.query.redirect_uri
+              - pattern-not: |
+                  if (!ALLOWED_REDIRECTS.includes(redirectUri))
+              - pattern-not: |
+                  if (!isValidRedirectUri(redirectUri))
+    message: |
+      CRITICAL: OAuth redirect_uri parameter not validated against whitelist.
+      
+      Risk (Redirect URI Open Redirect vulnerability): Attackers can perform OAuth
+      authorization code phishing attacks by registering a malicious redirect URI
+      with the OAuth provider (if dynamic), or by using URL parsing bypasses to
+      redirect to attacker-controlled domain.
+      
+      Attack Flow:
+        1. Attacker creates auth request: ?client_id=X&redirect_uri=https://attacker.com
+        2. User sees legitimate OAuth consent screen
+        3. After approval, code is sent to attacker's server
+        4. Attacker exchanges code for access token
+        5. Attacker gains access to victim's resources
+      
+      Fix:
+        ALLOWED_REDIRECTS = [
+            "https://yourdomain.com/oauth/callback",
+            "https://yourdomain.com/auth/google"
+        ]
+        
+        # Validation:
+        if redirect_uri not in ALLOWED_REDIRECTS:
+            return error("Invalid redirect URI")
+        
+        # Strict scheme + domain validation:
+        from urllib.parse import urlparse
+        parsed = urlparse(redirect_uri)
+        if parsed.scheme != "https" or not parsed.netloc.endswith(TRUSTED_DOMAIN):
+            return error("Redirect URI not allowed")
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-601: URL Redirection to Untrusted Site"
+      owasp: "A01:2021 - Broken Access Control"
+      cvss: "8.8"
+      references:
+        - "https://cheatsheetseries.owasp.org/cheatsheets/OAuth_2_Cheat_Sheet.html#redirect-uri-validation"
+
+  # HIGH: Authorization Code Reuse Prevention Missing
+  - id: oauth-auth-code-not-invalidated
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  authorization_code = $RESPONSE.get("code")
+                  ...
+                  token = exchange_code(authorization_code)
+              - pattern-not: |
+                  delete_auth_code(authorization_code)
+              - pattern-not: |
+                  mark_code_used(authorization_code)
+              - pattern-not: |
+                  auth_codes.pop(authorization_code)
+          - patterns:
+              - pattern: |
+                  const code = req.query.code;
+                  const token = await exchangeCodeForToken(code);
+              - pattern-not: |
+                  await invalidateAuthCode(code);
+              - pattern-not: |
+                  await deleteAuthCode(code);
+    message: |
+      HIGH: Authorization code not invalidated after exchange.
+      
+      Risk: Replay attack vulnerability. If authorization code is intercepted
+      by attacker, they can replay it to obtain additional tokens without user
+      interaction. Each auth code should only be exchangeable ONCE.
+      
+      Fix:
+        def exchange_authorization_code(code):
+            if code not in auth_codes:
+                raise InvalidCode("Code already used or expired")
+            
+            user_id = auth_codes[code]['user_id']
+            expiry = auth_codes[code]['expiry']
+            
+            if datetime.now() > expiry:
+                raise InvalidCode("Code expired")
+            
+            # CRITICAL: Delete code immediately after exchange
+            del auth_codes[code]
+            
+            # Create access token
+            token = create_access_token(user_id)
+            return {'access_token': token, 'token_type': 'Bearer'}
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-613: Insufficient Session Expiration"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+      references:
+        - "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2"
+
+  # HIGH: Client Secret Disclosed in Client-Side Code
+  - id: oauth-client-secret-exposed-frontend
+    patterns:
+      - pattern-either:
+          - pattern: |
+              const CLIENT_SECRET = "..."
+          - pattern: |
+              var CLIENT_SECRET = "..."
+          - pattern: |
+              CLIENT_SECRET = "..."
+          - patterns:
+              - pattern: |
+                  const config = {..., clientSecret: "...", ...}
+              - pattern-not: |
+                  if (typeof window === 'undefined')  # Backend check
+          - patterns:
+              - pattern: |
+                  process.env.REACT_APP_CLIENT_SECRET = "..."
+    message: |
+      CRITICAL: OAuth client secret exposed in client-side JavaScript code.
+      
+      Risk: Client credentials are visible to anyone with browser dev tools or
+      by viewing page source. Attackers can impersonate your application to
+      the OAuth provider and perform token theft attacks.
+      
+      Vulnerable Pattern:
+        // React component
+        const CLIENT_SECRET = "supersecret123";  // EXPOSED!
+        
+        const getAccessToken = async (code) => {
+          const response = await fetch('/token', {
+            body: JSON.stringify({
+              client_id: 'xyz',
+              client_secret: CLIENT_SECRET,  // Visible in network tab!
+              code: code
+            })
+          });
+        };
+      
+      Fix: Backend-only token exchange
+        // Frontend - NO SECRETS
+        const code = new URLSearchParams(location.search).get('code');
+        const response = await fetch('/api/oauth/callback', {
+          method: 'POST',
+          body: JSON.stringify({ code })
+        });
+        
+        // Backend - SECURE
+        @app.route('/api/oauth/callback', methods=['POST'])
+        def oauth_callback():
+            code = request.json.get('code')
+            
+            # Client secret is environment variable, NOT exposed
+            response = requests.post(OAUTH_TOKEN_URL, data={
+                'code': code,
+                'client_id': os.environ['OAUTH_CLIENT_ID'],
+                'client_secret': os.environ['OAUTH_CLIENT_SECRET'],
+                'redirect_uri': 'https://yourapp.com/auth/callback'
+            })
+            
+            tokens = response.json()
+            session['access_token'] = tokens['access_token']
+            return {'success': True}
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+      owasp: "A05:2021 - Security Misconfiguration"
+      cvss: "9.8"
+
+  # HIGH: Missing Nonce Parameter in OpenID Connect Flow
+  - id: oidc-missing-nonce-parameter
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  auth_url = f"{OIDC_ENDPOINT}?client_id={client_id}&..."
+              - pattern-not: |
+                  auth_url = f"{OIDC_ENDPOINT}?...&nonce={nonce}&..."
+              - pattern-not: |
+                  session['nonce'] = nonce
+          - patterns:
+              - pattern: |
+                  const authUrl = `${OIDC_ENDPOINT}?client_id=${clientId}...`
+              - pattern-not: |
+                  const authUrl = `${OIDC_ENDPOINT}?...&nonce=${nonce}...`
+    message: |
+      HIGH: OpenID Connect flow missing nonce parameter.
+      
+      Risk (Replay attack on ID tokens): The nonce prevents replay attacks where
+      an attacker captures an ID token from one session and attempts to reuse it
+      in another session.
+      
+      Fix:
+        import secrets
+        
+        # Generate nonce
+        nonce = secrets.token_urlsafe(32)
+        session['nonce'] = nonce
+        
+        # Include in auth URL
+        auth_url = f"{OIDC_ENDPOINT}?client_id={CLIENT_ID}&nonce={nonce}&..."
+        
+        # Verify nonce in ID token
+        id_token = id_token_jwt
+        claims = jwt.decode(id_token, options={"verify_signature": False})
+        
+        if claims.get('nonce') != session['nonce']:
+            raise InvalidNonce("Nonce mismatch - possible replay attack")
+    severity: ERROR
+    languages: [python, javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-613: Insufficient Session Expiration"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+
+  # MEDIUM: Missing Token Expiration Validation
+  - id: oauth-token-expiration-not-checked
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  access_token = response['access_token']
+                  ...
+                  user_info = requests.get(USER_INFO_URL, headers={'Authorization': f'Bearer {access_token}'})
+              - pattern-not: |
+                  if response.get('expires_in') and datetime.now() > token_expiry:
+              - pattern-not: |
+                  expiry = response.get('expires_in')
+          - patterns:
+              - pattern: |
+                  const accessToken = tokenResponse.access_token;
+                  fetch(USER_INFO_URL, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                  })
+              - pattern-not: |
+                  const expiresIn = tokenResponse.expires_in;
+    message: |
+      MEDIUM: OAuth token expiration time not validated before use.
+      
+      Risk: Using expired tokens will fail at runtime and cause poor UX.
+      More critically, if refresh tokens are present, client might be using
+      an expired token that could have been revoked.
+      
+      Fix:
+        class TokenStore:
+            def __init__(self):
+                self.token = None
+                self.expiry = None
+            
+            def set_token(self, token_response):
+                self.token = token_response['access_token']
+                # expires_in is in seconds
+                self.expiry = datetime.now() + timedelta(
+                    seconds=token_response['expires_in']
+                )
+            
+            def is_expired(self):
+                return datetime.now() >= self.expiry
+            
+            def get_valid_token(self):
+                if self.is_expired():
+                    # Refresh the token
+                    new_token = refresh_access_token(self.token)
+                    self.set_token(new_token)
+                return self.token
+    severity: WARNING
+    languages: [python, javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-613: Insufficient Session Expiration"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+
+  # HIGH: Refresh Token Stored in Insecure Location
+  - id: oauth-refresh-token-insecure-storage
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  localStorage.setItem('refresh_token', $TOKEN)
+              - pattern: |
+                  sessionStorage.setItem('refresh_token', $TOKEN)
+              - pattern: |
+                  window.refreshToken = $TOKEN
+          - patterns:
+              - pattern: |
+                  self.refresh_token = refresh_token_value
+              - pattern-not: |
+                  secure_storage.store(refresh_token_value)
+              - pattern-not: |
+                  encrypted_storage.save(refresh_token_value)
+    message: |
+      CRITICAL: Refresh token stored in insecure location (localStorage/sessionStorage).
+      
+      Risk (XSS vulnerability): Refresh tokens are long-lived credentials. If stored
+      in localStorage, they're accessible to any JavaScript running on the page,
+      including injected XSS payloads. XSS can steal refresh tokens and gain
+      persistent access to user accounts.
+      
+      Vulnerable Pattern:
+        // React component
+        const exchangeCodeForToken = async (code) => {
+          const response = await fetch('/api/auth/token', { body: code });
+          const { access_token, refresh_token } = await response.json();
+          
+          // VULNERABLE: localStorage is accessible to XSS
+          localStorage.setItem('access_token', access_token);
+          localStorage.setItem('refresh_token', refresh_token);
+        };
+      
+      Fix: Use HTTP-only, Secure, SameSite cookies (backend-managed):
+        // Backend
+        @app.route('/api/auth/token', methods=['POST'])
+        def token_endpoint():
+            tokens = get_tokens(code)
+            
+            # Use HTTP-only cookie (not accessible to JavaScript)
+            response = make_response({'success': True})
+            response.set_cookie(
+                'refresh_token',
+                tokens['refresh_token'],
+                httponly=True,      # JavaScript cannot access
+                secure=True,        # HTTPS only
+                samesite='Strict',  # CSRF protection
+                max_age=2592000     # 30 days
+            )
+            response.set_cookie(
+                'access_token',
+                tokens['access_token'],
+                httponly=True,
+                secure=True,
+                samesite='Strict',
+                max_age=3600
+            )
+            return response
+        
+        // Frontend - tokens automatically sent in requests
+        const response = await fetch('/api/user/profile');
+        // Cookies are automatically included by browser
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-522: Insufficiently Protected Credentials"
+      owasp: "A01:2021 - Broken Access Control"
+      cvss: "8.8"
+
+  # MEDIUM: Missing Token Revocation
+  - id: oauth-no-token-revocation
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  def logout():
+                      session.clear()
+                      return redirect("/")
+              - pattern-not: |
+                  revoke_token(access_token)
+              - pattern-not: |
+                  oauth_client.revoke_token(token)
+          - patterns:
+              - pattern: |
+                  app.post('/logout', (req, res) => {
+                    req.session.destroy();
+                    res.redirect('/');
+                  })
+              - pattern-not: |
+                  await revokeToken(accessToken)
+              - pattern-not: |
+                  await oauthClient.revokeToken(token)
+    message: |
+      MEDIUM: OAuth token revocation not implemented on logout.
+      
+      Risk: When user logs out, their OAuth tokens should be revoked on the
+      OAuth provider's side. Without revocation, if tokens are intercepted,
+      they remain valid and usable.
+      
+      Fix:
+        @app.route('/logout', methods=['POST'])
+        def logout():
+            access_token = session.get('access_token')
+            
+            # Revoke the token with OAuth provider
+            requests.post(
+                'https://oauth.provider.com/revoke',
+                data={
+                    'token': access_token,
+                    'client_id': OAUTH_CLIENT_ID,
+                    'client_secret': OAUTH_CLIENT_SECRET
+                }
+            )
+            
+            # Clear local session
+            session.clear()
+            return redirect('/')
+    severity: WARNING
+    languages: [python, javascript, typescript, php]
+    metadata:
+      category: security
+      cwe: "CWE-613: Insufficient Session Expiration"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+
+  # HIGH: Missing Access Token Scope Validation
+  - id: oauth-scope-not-validated
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  token = get_access_token()
+                  ...
+                  user_data = fetch_user_data(token)
+              - pattern-not: |
+                  required_scopes = ["email", "profile"]
+              - pattern-not: |
+                  validate_token_scopes(token, required_scopes)
+          - patterns:
+              - pattern: |
+                  const token = getAccessToken();
+                  const userData = await fetchUserData(token);
+              - pattern-not: |
+                  const requiredScopes = ["email", "profile"];
+              - pattern-not: |
+                  validateTokenScopes(token, requiredScopes);
+    message: |
+      HIGH: OAuth token scopes not validated before API calls.
+      
+      Risk: If a token with limited scopes is used to call APIs requiring
+      broader scopes, the request should fail. Missing scope validation can
+      lead to privilege escalation if tokens are accidentally issued with
+      incorrect scopes.
+      
+      Fix:
+        def validate_token_scopes(token, required_scopes):
+            # Decode without verification for scope check (or use token info endpoint)
+            claims = jwt.decode(token, options={"verify_signature": False})
+            token_scopes = claims.get('scope', '').split()
+            
+            missing = set(required_scopes) - set(token_scopes)
+            if missing:
+                raise InsufficientScope(f"Token missing scopes: {missing}")
+        
+        def fetch_user_profile(user_id, token):
+            validate_token_scopes(token, ['profile'])
+            return db.get_user(user_id)
+        
+        def fetch_user_email(user_id, token):
+            validate_token_scopes(token, ['email'])
+            return db.get_user_email(user_id)
+    severity: ERROR
+    languages: [python, javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-269: Improper Access Control"
+      owasp: "A01:2021 - Broken Access Control"
+
+  # HIGH: Insufficient Token Signature Validation
+  - id: oauth-token-signature-not-verified
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  token_payload = jwt.decode($TOKEN, options={"verify_signature": False})
+              - pattern-not: |
+                  jwt.decode($TOKEN, $PUBKEY, algorithms=["RS256"])
+          - patterns:
+              - pattern: |
+                  const decoded = jwt.decode(token);
+              - pattern-not: |
+                  const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] })
+    message: |
+      CRITICAL: OAuth token signature not verified.
+      
+      Risk: Tokens can be forged or tampered with. Always verify token signature
+      using the OAuth provider's public key.
+      
+      Fix (Google OAuth example):
+        from google.oauth2 import id_token
+        from google.auth.transport import requests
+        
+        def verify_google_token(token):
+            try:
+                # Fetch Google's public keys
+                id_info = id_token.verify_oauth2_token(
+                    token,
+                    requests.Request(),
+                    GOOGLE_CLIENT_ID
+                )
+                
+                # id_info contains verified claims
+                return id_info
+            except ValueError:
+                raise InvalidToken("Token verification failed")
+        
+        # Or for custom OAuth (RS256):
+        import jwt
+        
+        def verify_oauth_token(token, issuer, client_id):
+            # Get provider's public key
+            public_key = fetch_public_key(issuer)
+            
+            decoded = jwt.decode(
+                token,
+                public_key,
+                algorithms=['RS256'],
+                audience=client_id,
+                issuer=issuer
+            )
+            return decoded
+    severity: ERROR
+    languages: [python, javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-347: Improper Verification of Cryptographic Signature"
+      owasp: "A02:2021 - Cryptographic Failures"
+
+# ============================================================================
+# Authorization Server (Provider-Side) Security Issues
+# ============================================================================
+
+  # CRITICAL: No Rate Limiting on Authorization Endpoint
+  - id: oauth-authz-endpoint-no-rate-limit
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-inside: |
+                  @app.route('/oauth/authorize', ...)
+                  def authorize():
+                      ...
+              - pattern-not: |
+                  @limiter.limit(...)
+              - pattern-not: |
+                  if rate_limit_exceeded(...):
+    message: |
+      CRITICAL: OAuth authorization endpoint has no rate limiting.
+      
+      Risk: Attackers can perform:
+        - Authorization code brute-force attacks
+        - Credential stuffing attacks
+        - Distributed account enumeration
+      
+      Fix:
+        from flask_limiter import Limiter
+        from flask_limiter.util import get_remote_address
+        
+        limiter = Limiter(
+            app=app,
+            key_func=get_remote_address,
+            default_limits=["200 per day", "50 per hour"]
+        )
+        
+        @app.route('/oauth/authorize', methods=['GET', 'POST'])
+        @limiter.limit("10 per minute")
+        def authorize():
+            client_id = request.args.get('client_id')
+            # Validate and process authorization request
+            return authorization_form()
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-770: Allocation of Resources Without Limits"
+      owasp: "A05:2021 - Security Misconfiguration"
+
+  # HIGH: Authorization Code Without Time Expiration
+  - id: oauth-authz-code-no-expiry
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  auth_code = generate_code()
+                  auth_codes[auth_code] = {'user_id': user_id}
+              - pattern-not: |
+                  auth_codes[auth_code] = {'user_id': user_id, 'expires_at': ...}
+              - pattern-not: |
+                  'expires_at': datetime.now() + timedelta(minutes=10)
+    message: |
+      HIGH: Authorization code has no expiration time.
+      
+      Risk: Authorization codes should be short-lived (10 minutes recommended).
+      Without expiration, intercepted codes can be used indefinitely.
+      
+      Fix:
+        import uuid
+        from datetime import datetime, timedelta
+        
+        def generate_authorization_code(user_id, client_id, scope):
+            code = secrets.token_urlsafe(32)
+            auth_codes[code] = {
+                'user_id': user_id,
+                'client_id': client_id,
+                'scope': scope,
+                'created_at': datetime.now(),
+                'expires_at': datetime.now() + timedelta(minutes=10)
+            }
+            return code
+        
+        def exchange_authorization_code(code):
+            if code not in auth_codes:
+                raise InvalidCode("Code not found")
+            
+            code_data = auth_codes[code]
+            
+            # Check expiration
+            if datetime.now() > code_data['expires_at']:
+                del auth_codes[code]
+                raise InvalidCode("Code expired")
+            
+            # Exchange for token...
+            del auth_codes[code]
+    severity: ERROR
+    languages: [python, javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-613: Insufficient Session Expiration"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+
+  # CRITICAL: No PKCE Validation for Public Clients
+  - id: oauth-server-pkce-not-enforced-public
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  def exchange_code(code, client_id, code_verifier=None):
+                      ...
+                      return access_token
+              - pattern-not: |
+                  is_public_client = clients[client_id].get('is_public', False)
+              - pattern-not: |
+                  if is_public_client and not code_verifier:
+    message: |
+      CRITICAL: OAuth server not enforcing PKCE for public clients.
+      
+      Risk: Public clients (mobile apps, SPAs) MUST use PKCE. Without PKCE
+      validation on the server, authorization code interception attacks are possible.
+      
+      Fix:
+        def exchange_authorization_code(code, client_id, code_verifier, redirect_uri):
+            # Validate code
+            code_data = auth_codes.get(code)
+            if not code_data:
+                raise InvalidCode()
+            
+            client = clients[client_id]
+            
+            # For public clients, PKCE is REQUIRED
+            if client.get('is_public', False):
+                if not code_verifier:
+                    raise MissingPKCE("Public client must provide code_verifier")
+                
+                # Verify code_challenge
+                expected_challenge = base64.urlsafe_b64encode(
+                    hashlib.sha256(code_verifier.encode()).digest()
+                ).decode().rstrip('=')
+                
+                if code_data['code_challenge'] != expected_challenge:
+                    raise InvalidPKCE("Code verifier does not match challenge")
+            
+            # Generate and return tokens...
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-295: Improper Certificate Validation"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+
+  # MEDIUM: Insufficient Endpoint Security Headers
+  - id: oauth-missing-security-headers
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-inside: |
+                  @app.route('/oauth/...')
+                  def oauth_endpoint():
+              - pattern-not: |
+                  response.headers['X-Content-Type-Options'] = 'nosniff'
+              - pattern-not: |
+                  response.headers['X-Frame-Options'] = 'DENY'
+              - pattern-not: |
+                  response.headers['Cache-Control'] = 'no-store'
+    message: |
+      MEDIUM: OAuth endpoints missing security headers.
+      
+      Fix:
+        @app.route('/oauth/authorize')
+        def authorize():
+            response = make_response(...)
+            
+            # Prevent MIME sniffing attacks
+            response.headers['X-Content-Type-Options'] = 'nosniff'
+            
+            # Prevent clickjacking
+            response.headers['X-Frame-Options'] = 'DENY'
+            
+            # Prevent caching of auth codes and tokens
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+            
+            return response
+    severity: WARNING
+    languages: [python, javascript, typescript, php]
+    metadata:
+      category: security
+      cwe: "CWE-693: Protection Mechanism Failure"
+      owasp: "A05:2021 - Security Misconfiguration"

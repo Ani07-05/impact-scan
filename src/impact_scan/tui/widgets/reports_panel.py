@@ -14,7 +14,7 @@ from textual.widgets import Button, Static
 
 from impact_scan.core import aggregator
 from impact_scan.core.html_report import save_report
-from impact_scan.core.markdown_report import generate_markdown_report
+from impact_scan.core.markdown_report import MarkdownReportGenerator
 from impact_scan.utils.schema import ScanResult
 
 # Colors
@@ -218,6 +218,10 @@ class ReportsPanel(Container):
                 id="report-status",
             )
 
+    def set_scan_result(self, scan_result: ScanResult) -> None:
+        """Set the scan result and update the panel."""
+        self.update_statistics(scan_result)
+
     def update_statistics(self, scan_result: ScanResult) -> None:
         """Update statistics from scan result."""
         self.scan_result = scan_result
@@ -335,7 +339,8 @@ class ReportsPanel(Container):
             output_file = Path.cwd() / f"impact_scan_report_{timestamp}.md"
 
             self.log_message("Generating Markdown report...", "yellow")
-            markdown_content = generate_markdown_report(self.scan_result)
+            generator = MarkdownReportGenerator()
+            markdown_content = generator.generate_markdown(self.scan_result)
 
             with open(output_file, "w", encoding="utf-8") as f:
                 f.write(markdown_content)

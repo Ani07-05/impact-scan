@@ -223,19 +223,33 @@ class APIKeys(BaseModel):
         """Initialize with environment variable auto-detection."""
         import os
 
-        # Auto-detect from environment if not explicitly provided
+        # Helper to get key from keyring or env
+        def get_api_key(key_name: str, env_var: str):
+            # First try keyring
+            try:
+                import keyring
+                stored_key = keyring.get_password("impact-scan", key_name)
+                if stored_key:
+                    return stored_key
+            except Exception:
+                pass
+
+            # Fallback to environment variable
+            return os.getenv(env_var)
+
+        # Auto-detect from keyring/environment if not explicitly provided
         if "openai" not in data and not data.get("openai"):
-            data["openai"] = os.getenv("OPENAI_API_KEY")
+            data["openai"] = get_api_key("openai_api_key", "OPENAI_API_KEY")
         if "anthropic" not in data and not data.get("anthropic"):
-            data["anthropic"] = os.getenv("ANTHROPIC_API_KEY")
+            data["anthropic"] = get_api_key("anthropic_api_key", "ANTHROPIC_API_KEY")
         if "gemini" not in data and not data.get("gemini"):
-            data["gemini"] = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            data["gemini"] = get_api_key("gemini_api_key", "GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if "groq" not in data and not data.get("groq"):
-            data["groq"] = os.getenv("GROQ_API_KEY")
+            data["groq"] = get_api_key("groq_api_key", "GROQ_API_KEY")
         if "stackoverflow" not in data and not data.get("stackoverflow"):
-            data["stackoverflow"] = os.getenv("STACKOVERFLOW_API_KEY")
+            data["stackoverflow"] = get_api_key("stackoverflow_api_key", "STACKOVERFLOW_API_KEY")
         if "parsebot" not in data and not data.get("parsebot"):
-            data["parsebot"] = os.getenv("PARSEBOT_API_KEY")
+            data["parsebot"] = get_api_key("parsebot_api_key", "PARSEBOT_API_KEY")
 
         super().__init__(**data)
 

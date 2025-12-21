@@ -9,6 +9,7 @@
 ## Features
 
 - **AI-Powered Analysis**: Uses models like GPT-4, Claude, or Gemini to validate findings and explain vulnerabilities.
+- **Groq-Powered Repository Analysis**: Automatically analyzes your codebase and generates custom security rules tailored to your specific architecture.
 - **Agentic Architecture**:
     - **StaticAnalysisAgent**: Deep code scanning using Semgrep and Bandit.
     - **ComprehensiveSecurityCrawler**: Web-enriched thread intelligence and exploit verification.
@@ -26,6 +27,19 @@ poetry add impact-scan
 ```
 
 ## Usage
+
+### Initialize Repository Analysis (Recommended First Step)
+Generate custom security rules for your codebase using Groq AI:
+```bash
+# Requires GROQ_API_KEY environment variable
+impact-scan init-repo .
+
+# This generates:
+# - impact-scan.md (detailed analysis)
+# - .impact-scan/custom-rules.yml (tailored security rules)
+```
+
+See [GROQ_REPO_ANALYSIS.md](GROQ_REPO_ANALYSIS.md) for detailed instructions.
 
 ### Basic Scan
 Scan the current directory:

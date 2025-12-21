@@ -147,23 +147,68 @@ def run_scan(config: schema.ScanConfig) -> schema.ScanResult:
         # 2. Run synchronous scanners with intelligent rule selection
         all_findings = []
 
+        # 2.1. Secret detection scan (fast, always runs first)
+        try:
+            logger.info("Running secret detection scan...")
+            from . import repo_analyzer
+            analyzer = repo_analyzer.RepoAnalyzer(config.root_path)
+            analysis = analyzer.analyze()
+            secrets = analysis.get('secrets_found', [])
+            
+            if secrets:
+                logger.warning(f"Found {len(secrets)} exposed secrets!")
+                for secret in secrets:
+                    # Convert secret to Finding
+                    severity_map = {
+                        'CRITICAL': schema.Severity.CRITICAL,
+                        'HIGH': schema.Severity.HIGH,
+                        'MEDIUM': schema.Severity.MEDIUM,
+                        'LOW': schema.Severity.LOW,
+                    }
+                    finding = schema.Finding(
+                        rule_id=f"secret-{secret['type']}",
+                        vuln_id=f"CWE-798-{secret['type']}",
+                        title=f"Exposed Secret: {secret['description']}",
+                        severity=severity_map.get(secret['severity'], schema.Severity.HIGH),
+                        source=schema.VulnSource.STATIC_ANALYSIS,
+                        code_snippet=secret.get('line_content', '[secret content redacted]'),
+                        description=f"{secret['description']}. Found in {secret['file']} at line {secret['line']}. "
+                                   f"Hardcoded secrets should never be committed to version control.",
+                        file_path=Path(config.root_path) / secret['file'],
+                        line_number=secret['line'],
+                        fix_suggestion="1. Remove the hardcoded secret from your code\n"
+                                      "2. Use environment variables instead\n"
+                                      "3. Add .env files to .gitignore\n"
+                                      "4. Rotate the compromised key immediately",
+                        metadata={
+                            "cwe_id": "CWE-798",
+                            "category": "secrets",
+                            "secret_type": secret['type'],
+                            "masked_value": secret.get('masked_value', '***'),
+                        },
+                    )
+                    all_findings.append(finding)
+        except Exception as e:
+            logger.error(f"Secret detection scan failed: {e}")
+
+        # 2.2. Static analysis scan
         try:
             logger.info("Running static analysis scan (Agent-based)...")
-            # static_findings = static_scan.run_scan(config, project_context)
             
             # Initialize Agent
             agent = StaticAnalysisAgent(name="static_analyser", config=config)
-            agent_result = AgentResult(agent_name="static_analyser")
             
             # Execute Agent (wrap in asyncio for sync context)
             import asyncio
-            asyncio.run(agent.execute(config.root_path, context={"project": project_context}, result=agent_result))
+            agent_result = asyncio.run(agent.execute(config.root_path, context={"project": project_context}))
             
-            static_findings = agent_result.findings
-            all_findings.extend(static_findings)
+            if agent_result and agent_result.findings:
+                static_findings = agent_result.findings
+                all_findings.extend(static_findings)
         except Exception as e:
             logger.error(f"Static analysis scan failed: {e}")
 
+        # 2.3. Dependency audit scan
         try:
             logger.info("Running dependency audit scan...")
             dep_findings = dep_audit.run_scan(config)

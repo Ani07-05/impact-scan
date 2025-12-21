@@ -29,9 +29,11 @@ class ConfigPanel(Container):
     DEFAULT_CSS = """
     ConfigPanel {
         height: auto;
+        min-height: 25;
         background: #161B22;
         padding: 1;
-        border: solid #30363D;
+        border: round #30363D;
+        margin: 0 0 1 0;
     }
 
     ConfigPanel .config-row {
@@ -40,55 +42,78 @@ class ConfigPanel(Container):
     }
 
     ConfigPanel .config-label {
-        width: 8;
-        color: #7D8590;
+        width: 10;
+        color: #8B949E;
         text-align: right;
         margin-right: 1;
         content-align: right middle;
+        text-style: bold;
     }
 
     ConfigPanel .config-input {
         width: 1fr;
         background: #0D1117;
-        border: solid #30363D;
+        border: round #30363D;
         color: #E6EDF3;
+        padding: 0 1;
     }
 
     ConfigPanel .config-input:focus {
-        border: solid #00D4FF;
+        border: round #1F6FEB;
     }
 
     ConfigPanel .config-select {
         width: 1fr;
         background: #0D1117;
-        border: solid #30363D;
+        border: round #30363D;
         padding: 0 1;
     }
 
+    ConfigPanel .config-select:focus {
+        border: round #1F6FEB;
+    }
+
     ConfigPanel .mini-btn {
-        width: 6;
+        width: 5;
+        height: 3;
         margin-left: 1;
-        min-width: 6;
-        background: #00D4FF;
-        color: #0D1117;
-        border: none;
+        min-width: 5;
+        background: #21262D;
+        color: #FFA657;
+        border: round #373E47;
+        text-style: bold;
     }
 
     ConfigPanel .mini-btn:hover {
-        background: #50FA7B;
+        background: #30363D;
+        color: #FFA657;
+        border: round #FFA657;
+    }
+
+    ConfigPanel .mini-btn:focus {
+        background: #21262D;
+        color: #FFA657;
+        border: round #FFA657;
     }
 
     ConfigPanel .browse-button {
         width: 100%;
         height: 3;
         margin: 0 0 1 0;
-        background: #00D4FF;
-        color: #0D1117;
+        background: #1F6FEB;
+        color: white;
         text-style: bold;
+        border: round #388BFD;
     }
 
     ConfigPanel .browse-button:hover {
-        background: #50FA7B;
+        background: #388BFD;
+        border: round #58A6FF;
+    }
+
+    ConfigPanel .browse-button:focus {
+        background: #1F6FEB;
+        border: round #58A6FF;
     }
 
     ConfigPanel .ai-row {
@@ -110,16 +135,17 @@ class ConfigPanel(Container):
         text-style: bold;
         background: #238636;
         color: white;
-        border: solid #2EA043;
+        border: round #2EA043;
     }
 
     ConfigPanel .scan-button:hover {
         background: #2EA043;
-        border: solid #3FB950;
+        border: round #3FB950;
     }
 
     ConfigPanel .scan-button:focus {
-        background: #3FB950;
+        background: #238636;
+        border: round #3FB950;
     }
     """
 
@@ -162,7 +188,7 @@ class ConfigPanel(Container):
                 classes="config-select",
             )
             yield Button(
-                "K",
+                "🔑",
                 variant="default",
                 id="keys-btn",
                 classes="mini-btn",
@@ -184,6 +210,10 @@ class ConfigPanel(Container):
 
     def get_scan_path(self) -> str:
         """Get the scan path value."""
+        return self._scan_path
+
+    def get_path(self) -> str:
+        """Get the scan path value (alias for get_scan_path)."""
         return self._scan_path
 
     def set_scan_path(self, path: str) -> None:

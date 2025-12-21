@@ -64,9 +64,19 @@ def print_findings(result: schema.ScanResult, min_severity: schema.Severity) -> 
     ]
 
     if not filtered_findings:
-        console.print(
-            "\n[bold green][SUCCESS] No vulnerabilities found matching the criteria![/bold green]"
-        )
+        # Show how many findings were below threshold
+        below_threshold = len(result.findings)
+        if below_threshold > 0:
+            console.print(
+                f"\n[bold yellow][INFO] {below_threshold} finding(s) detected but below minimum severity threshold ({min_severity.value})[/bold yellow]"
+            )
+            console.print(
+                f"[dim]Run without --min-severity to see all findings, or check the HTML report.[/dim]\n"
+            )
+        else:
+            console.print(
+                "\n[bold green][SUCCESS] No vulnerabilities found![/bold green]"
+            )
         return
 
     sorted_findings = sorted(

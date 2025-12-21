@@ -187,3 +187,8 @@ node_modules/
 
 # Generated docs
 docs/analysis/
+GROQ_SYSTEM_PROMPTS_REFERENCE.txt
+IMPLEMENTATION_OVERVIEW.txt
+IMPLEMENTATION_SUMMARY.txt
+COMMANDS.txt
+QUICK_START.txt

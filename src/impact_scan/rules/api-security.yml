@@ -1,0 +1,640 @@
+rules:
+  # ============================================================================
+  # REST API & Backend Security Vulnerabilities
+  # ============================================================================
+
+  # CRITICAL: No Authentication on Protected Endpoints
+  - id: api-missing-authentication
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-inside: |
+                  @app.route('/api/user/<user_id>', methods=['GET'])
+                  def get_user(user_id):
+              - pattern-not: |
+                  @require_auth
+              - pattern-not: |
+                  if not is_authenticated():
+              - pattern-not: |
+                  if 'user_id' not in session:
+          - patterns:
+              - pattern-inside: |
+                  app.get('/api/user/:user_id', (req, res) => {
+              - pattern-not: |
+                  if (!req.user || !req.isAuthenticated())
+              - pattern-not: |
+                  authMiddleware(req, res, ...)
+    message: |
+      CRITICAL: Protected API endpoint missing authentication check.
+      
+      Risk: Anyone can access user data, modify settings, perform actions
+      without being authenticated.
+      
+      Fix (Flask):
+        from functools import wraps
+        from flask import session, abort
+        
+        def require_auth(f):
+            @wraps(f)
+            def decorated_function(*args, **kwargs):
+                if 'user_id' not in session:
+                    return {'error': 'Unauthorized'}, 401
+                return f(*args, **kwargs)
+            return decorated_function
+        
+        @app.route('/api/user/<int:user_id>')
+        @require_auth
+        def get_user(user_id):
+            # Only authenticated users reach here
+            if session['user_id'] != user_id:
+                return {'error': 'Forbidden'}, 403
+            
+            user = User.query.get(user_id)
+            return {'user': user.to_dict()}
+      
+      Fix (Express):
+        const authenticate = (req, res, next) => {
+          const token = req.headers['authorization']?.replace('Bearer ', '');
+          if (!token) return res.status(401).json({ error: 'Unauthorized' });
+          
+          try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            req.user = decoded;
+            next();
+          } catch (err) {
+            res.status(401).json({ error: 'Invalid token' });
+          }
+        };
+        
+        app.get('/api/user/:userId', authenticate, (req, res) => {
+          if (req.user.id !== parseInt(req.params.userId)) {
+            return res.status(403).json({ error: 'Forbidden' });
+          }
+          
+          const user = User.findById(req.params.userId);
+          res.json({ user });
+        });
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-306: Missing Authentication for Critical Function"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+      cvss: "9.8"
+
+  # CRITICAL: Insecure Direct Object Reference (IDOR)
+  - id: api-insecure-direct-object-reference
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  user_id = request.args.get('user_id')
+                  ...
+                  user = User.query.get(user_id)
+                  return user.to_dict()
+              - pattern-not: |
+                  if session['user_id'] != user_id:
+              - pattern-not: |
+                  if current_user.id != user_id:
+          - patterns:
+              - pattern: |
+                  const userId = req.query.user_id;
+                  const user = User.findById(userId);
+                  res.json(user);
+              - pattern-not: |
+                  if (req.user.id !== userId)
+    message: |
+      CRITICAL: Insecure Direct Object Reference (IDOR) vulnerability.
+      
+      Risk: Users can access other users' data by changing object IDs in requests.
+      Attackers can enumerate all user records, steal sensitive data, modify
+      other users' information.
+      
+      Vulnerable Pattern:
+        GET /api/users/123/profile  -> Attacker changes to 124, 125, etc.
+        POST /api/orders/456/edit   -> Attacker edits another's order
+      
+      Fix:
+        @app.route('/api/user/<int:user_id>')
+        @require_auth
+        def get_user(user_id):
+            # CRITICAL: Verify ownership
+            current_user_id = session.get('user_id')
+            if current_user_id != user_id:
+                return {'error': 'Forbidden'}, 403
+            
+            user = User.query.get(user_id)
+            if not user:
+                return {'error': 'Not found'}, 404
+            
+            return user.to_dict()
+        
+        @app.route('/api/orders/<int:order_id>', methods=['POST'])
+        @require_auth
+        def update_order(order_id):
+            order = Order.query.get(order_id)
+            if not order:
+                return {'error': 'Not found'}, 404
+            
+            # Verify user owns this order
+            if order.user_id != session['user_id']:
+                return {'error': 'Forbidden'}, 403
+            
+            # Process update...
+            return order.to_dict()
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-639: Authorization Bypass Through User-Controlled Key"
+      owasp: "A01:2021 - Broken Access Control"
+      cvss: "8.8"
+
+  # HIGH: Missing Rate Limiting on API Endpoints
+  - id: api-missing-rate-limiting
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-inside: |
+                  @app.route('/api/...')
+                  def api_endpoint():
+              - pattern-not: |
+                  @limiter.limit(...)
+              - pattern-not: |
+                  @rate_limit(...)
+          - patterns:
+              - pattern-inside: |
+                  app.post('/api/...'
+              - pattern-not: |
+                  rateLimit(...)
+    message: |
+      HIGH: API endpoint missing rate limiting.
+      
+      Risk: Attackers can perform:
+        - Brute-force attacks on login/password endpoints
+        - DDoS attacks by flooding endpoints
+        - Resource enumeration attacks
+        - Credential stuffing attacks
+      
+      Fix (Flask-Limiter):
+        from flask_limiter import Limiter
+        from flask_limiter.util import get_remote_address
+        
+        limiter = Limiter(
+            app=app,
+            key_func=get_remote_address,
+            default_limits=["200 per day", "50 per hour"]
+        )
+        
+        # Strict limit on sensitive endpoints
+        @app.route('/api/auth/login', methods=['POST'])
+        @limiter.limit("5 per minute")
+        def login():
+            # Authenticate...
+            return {'token': token}
+        
+        # Moderate limit on data endpoints
+        @app.route('/api/users', methods=['GET'])
+        @limiter.limit("100 per hour")
+        def list_users():
+            return users
+      
+      Fix (Express):
+        const rateLimit = require('express-rate-limit');
+        
+        const loginLimiter = rateLimit({
+          windowMs: 1 * 60 * 1000,  // 1 minute
+          max: 5,                    // 5 requests per window
+          message: 'Too many login attempts'
+        });
+        
+        app.post('/api/auth/login', loginLimiter, (req, res) => {
+          // Handle login
+        });
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-770: Allocation of Resources Without Limits"
+      owasp: "A05:2021 - Security Misconfiguration"
+
+  # HIGH: API Returns Sensitive Error Details
+  - id: api-excessive-error-details
+    patterns:
+      - pattern-either:
+          - pattern: |
+              return {'error': str(exception)}
+          - pattern: |
+              return {'error': e.message}
+          - pattern: |
+              return {'error': traceback.format_exc()}
+          - pattern: |
+              return {'error': sys.exc_info()}
+          - pattern: |
+              res.json({ error: err.stack })
+    message: |
+      HIGH: API returning detailed error messages to clients.
+      
+      Risk: Detailed error messages reveal:
+        - Database structure and field names
+        - Framework/library versions
+        - File paths and system architecture
+        - SQL query structure (SQL injection hints)
+      
+      Vulnerable Responses:
+        {
+          "error": "Column 'user_password' not found in table 'users'",
+          "type": "DatabaseError",
+          "query": "SELECT * FROM users WHERE id = ?"
+        }
+      
+      Fix:
+        @app.errorhandler(Exception)
+        def handle_error(error):
+            # Log full details server-side
+            logger.error(f"Error: {type(error).__name__}", exc_info=error)
+            
+            # Return generic error to client
+            return {
+                'error': 'An error occurred',
+                'request_id': generate_request_id()  # For support reference
+            }, 500
+        
+        @app.route('/api/users/<int:user_id>')
+        def get_user(user_id):
+            try:
+                user = User.query.get(user_id)
+                if not user:
+                    return {'error': 'User not found'}, 404
+                return user.to_dict()
+            except Exception as e:
+                # Log details
+                logger.error(f"Failed to get user {user_id}", exc_info=e)
+                # Return generic error
+                return {'error': 'An error occurred'}, 500
+    severity: WARNING
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-209: Information Exposure Through an Error Message"
+      owasp: "A01:2021 - Broken Access Control"
+
+  # HIGH: Missing Input Validation on API
+  - id: api-missing-input-validation
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  email = request.json.get('email')
+                  user = User.create(email=email)
+              - pattern-not: |
+                  if not is_valid_email(email):
+              - pattern-not: |
+                  if not email or '@' not in email:
+          - patterns:
+              - pattern: |
+                  const age = req.body.age;
+                  user.age = age;
+              - pattern-not: |
+                  if (typeof age !== 'number' || age < 0)
+    message: |
+      HIGH: API endpoint missing input validation.
+      
+      Risk: Missing validation enables:
+        - SQL injection (with unsanitized input)
+        - XSS attacks (if data reflected in responses)
+        - Business logic bypasses
+        - Type confusion attacks
+      
+      Fix:
+        from pydantic import BaseModel, EmailStr, validator
+        
+        class UserCreate(BaseModel):
+            email: EmailStr
+            username: str
+            age: int
+            
+            @validator('username')
+            def username_alphanumeric(cls, v):
+                assert v.isalnum(), 'Username must be alphanumeric'
+                assert len(v) >= 3, 'Username must be at least 3 chars'
+                return v
+            
+            @validator('age')
+            def age_valid(cls, v):
+                assert 0 <= v <= 150, 'Invalid age'
+                return v
+        
+        @app.route('/api/users', methods=['POST'])
+        def create_user():
+            try:
+                user_data = UserCreate(**request.json)
+            except ValidationError as e:
+                return {'error': 'Invalid input', 'details': e.errors()}, 400
+            
+            user = User.create(**user_data.dict())
+            return user.to_dict(), 201
+      
+      Fix (Express):
+        const { body, validationResult } = require('express-validator');
+        
+        app.post('/api/users', [
+          body('email').isEmail(),
+          body('username').isAlphanumeric().isLength({ min: 3 }),
+          body('age').isInt({ min: 0, max: 150 })
+        ], (req, res) => {
+          const errors = validationResult(req);
+          if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+          }
+          
+          const user = User.create(req.body);
+          res.status(201).json(user);
+        });
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-20: Improper Input Validation"
+      owasp: "A06:2021 - Vulnerable and Outdated Components"
+
+  # MEDIUM: API Missing Proper HTTP Methods
+  - id: api-unsafe-http-methods
+    patterns:
+      - pattern-either:
+          - pattern: |
+              @app.route('/api/users/<id>', methods=['GET', 'POST'])
+              def delete_or_get_user(id):
+                  if request.method == 'POST':
+                      delete_user(id)
+          - pattern: |
+              app.get('/api/delete-resource/:id', (req, res) => {
+                res.json({ deleted: deleteResource(req.params.id) });
+              })
+    message: |
+      MEDIUM: API endpoint using unsafe HTTP methods for destructive operations.
+      
+      Risk: Using GET for destructive operations allows:
+        - Accidental deletion via URL prefetching
+        - Email link clicks performing unexpected actions
+        - Cache poisoning issues
+      
+      REST Best Practice:
+        - GET: Retrieve data (safe, idempotent)
+        - POST: Create data
+        - PUT/PATCH: Update data
+        - DELETE: Delete data (use DELETE method)
+      
+      Fix:
+        # Use proper HTTP methods
+        @app.route('/api/users/<int:user_id>', methods=['GET'])
+        def get_user(user_id):
+            return User.query.get(user_id).to_dict()
+        
+        @app.route('/api/users', methods=['POST'])
+        def create_user():
+            user = User.create(**request.json)
+            return user.to_dict(), 201
+        
+        @app.route('/api/users/<int:user_id>', methods=['PUT'])
+        def update_user(user_id):
+            user = User.query.get(user_id)
+            user.update(**request.json)
+            return user.to_dict()
+        
+        @app.route('/api/users/<int:user_id>', methods=['DELETE'])
+        @require_auth
+        def delete_user(user_id):
+            # Verify ownership before delete
+            if session['user_id'] != user_id:
+                return {'error': 'Forbidden'}, 403
+            
+            User.query.get(user_id).delete()
+            return {'deleted': True}
+    severity: WARNING
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-352: Cross-Site Request Forgery (CSRF)"
+      owasp: "A04:2021 - Insecure Design"
+
+  # HIGH: Sensitive Data in API Responses
+  - id: api-leaks-sensitive-data
+    patterns:
+      - pattern-either:
+          - pattern: |
+              user.to_dict()
+          - pattern: |
+              return user.to_json()
+          - pattern: |
+              res.json(user)
+          - pattern: |
+              json.dumps(user.__dict__)
+    message: |
+      HIGH: API response may leak sensitive user data.
+      
+      Risk: Serializing entire user objects can expose:
+        - Password hashes
+        - Credit card numbers
+        - Social security numbers
+        - API keys/tokens
+        - Internal IDs
+      
+      Vulnerable:
+        user = User.query.get(user_id)
+        return user.to_dict()  # Serializes ALL fields including secrets
+      
+      Fix - Explicit field selection:
+        def get_user(user_id):
+            user = User.query.get(user_id)
+            return {
+                'id': user.id,
+                'name': user.name,
+                'email': user.email,
+                # Explicitly exclude sensitive fields
+                # 'password_hash': NOT INCLUDED
+                # 'api_key': NOT INCLUDED
+            }
+      
+      Fix - Use serialization schema:
+        from marshmallow import Schema, fields
+        
+        class UserSchema(Schema):
+            id = fields.Int()
+            name = fields.Str()
+            email = fields.Email()
+            # Fields NOT listed are excluded
+            
+            class Meta:
+                fields = ('id', 'name', 'email')
+        
+        def get_user(user_id):
+            user = User.query.get(user_id)
+            schema = UserSchema()
+            return schema.dump(user)
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-200: Exposure of Sensitive Information to an Unauthorized Actor"
+      owasp: "A01:2021 - Broken Access Control"
+
+  # CRITICAL: API Accepting File Uploads Without Validation
+  - id: api-unsafe-file-upload
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  file = request.files['file']
+                  file.save(UPLOAD_DIR)
+              - pattern-not: |
+                  allowed_extensions = {'.jpg', '.png', '.pdf'}
+              - pattern-not: |
+                  if not file.filename.endswith(allowed_extensions):
+          - patterns:
+              - pattern: |
+                  const file = req.files.file;
+                  fs.writeFileSync(uploadPath, file.data);
+              - pattern-not: |
+                  const allowed = ['.jpg', '.png'];
+    message: |
+      CRITICAL: File upload endpoint missing validation.
+      
+      Risk: Unvalidated file uploads enable:
+        - Arbitrary file upload (shell.php)
+        - Path traversal (../../etc/passwd)
+        - Denial of service (huge files)
+        - RCE (execute uploaded code)
+      
+      Vulnerable:
+        @app.route('/upload', methods=['POST'])
+        def upload_file():
+            file = request.files['file']
+            file.save(os.path.join('uploads', file.filename))  # DANGEROUS
+            return {'saved': True}
+      
+      Attack: Upload file.php with code, execute it
+      
+      Fix:
+        import os
+        from werkzeug.utils import secure_filename
+        import magic  # python-magic for MIME type detection
+        
+        UPLOAD_DIR = 'uploads'
+        ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.pdf'}
+        MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+        ALLOWED_MIMES = {'image/jpeg', 'image/png', 'application/pdf'}
+        
+        @app.route('/upload', methods=['POST'])
+        @require_auth
+        def upload_file():
+            if 'file' not in request.files:
+                return {'error': 'No file provided'}, 400
+            
+            file = request.files['file']
+            
+            # 1. Check filename
+            filename = secure_filename(file.filename)
+            if not filename:
+                return {'error': 'Invalid filename'}, 400
+            
+            # 2. Check extension
+            _, ext = os.path.splitext(filename)
+            if ext.lower() not in ALLOWED_EXTENSIONS:
+                return {'error': 'File type not allowed'}, 400
+            
+            # 3. Check file size
+            file.seek(0, os.SEEK_END)
+            file_size = file.tell()
+            file.seek(0)
+            if file_size > MAX_FILE_SIZE:
+                return {'error': 'File too large'}, 400
+            
+            # 4. Check MIME type
+            mime = magic.Magic(mime=True)
+            file_mime = mime.from_buffer(file.read(1024))
+            file.seek(0)
+            if file_mime not in ALLOWED_MIMES:
+                return {'error': 'Invalid file type'}, 400
+            
+            # 5. Generate random filename to prevent collisions/overwrites
+            import secrets
+            random_name = secrets.token_hex(16) + ext
+            filepath = os.path.join(UPLOAD_DIR, random_name)
+            
+            file.save(filepath)
+            
+            return {
+                'filename': random_name,
+                'size': file_size
+            }, 201
+    severity: ERROR
+    languages: [python, javascript, typescript, php, java]
+    metadata:
+      category: security
+      cwe: "CWE-434: Unrestricted Upload of File with Dangerous Type"
+      owasp: "A04:2021 - Insecure Design"
+      cvss: "9.8"
+
+  # MEDIUM: API Allowing HTTP (Not HTTPS)
+  - id: api-not-https-only
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  app.run(host='0.0.0.0', port=5000)
+              - pattern-not: |
+                  ssl_context=...
+              - pattern-not: |
+                  if __name__ == '__main__' and os.environ.get('ENV') == 'production':
+          - pattern: |
+              app.listen(3000)
+    message: |
+      MEDIUM: API accessible over plain HTTP (not HTTPS).
+      
+      Risk in production: All traffic is unencrypted, vulnerable to MITM attacks.
+      Authentication tokens, user data, etc. transmitted in plaintext.
+      
+      Fix (Flask):
+        import os
+        
+        if __name__ == '__main__':
+            if os.environ.get('ENV') == 'production':
+                # Use HTTPS with SSL certificate
+                app.run(
+                    host='0.0.0.0',
+                    port=443,
+                    ssl_context=('cert.pem', 'key.pem'),
+                    debug=False
+                )
+            else:
+                # Development only - HTTP OK
+                app.run(debug=True)
+      
+      Fix (Nginx reverse proxy):
+        server {
+            listen 80;
+            server_name api.example.com;
+            # Redirect all HTTP to HTTPS
+            return 301 https://$server_name$request_uri;
+        }
+        
+        server {
+            listen 443 ssl;
+            server_name api.example.com;
+            
+            ssl_certificate /path/to/cert.pem;
+            ssl_certificate_key /path/to/key.pem;
+            ssl_protocols TLSv1.2 TLSv1.3;
+            ssl_ciphers HIGH:!aNULL:!MD5;
+            
+            location / {
+                proxy_pass http://localhost:5000;
+            }
+        }
+    severity: WARNING
+    languages: [python, javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-295: Improper Certificate Validation"
+      owasp: "A02:2021 - Cryptographic Failures"

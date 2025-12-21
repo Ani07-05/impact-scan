@@ -90,7 +90,7 @@ class CodebaseTree(Container):
     CodebaseTree {
         height: 1fr;
         background: #0D1117;
-        border: solid #30363D;
+        border: round #30363D;
     }
 
     CodebaseTree Tree {
@@ -228,7 +228,7 @@ class ScanInfo(Container):
     ScanInfo {
         height: auto;
         background: #161B22;
-        border: solid #30363D;
+        border: round #30363D;
         padding: 1;
         margin: 0 0 1 0;
     }
@@ -310,7 +310,7 @@ class ProgressLog(Container):
     ProgressLog {
         height: 1fr;
         background: #0D1117;
-        border: solid #30363D;
+        border: round #30363D;
         padding: 1;
     }
 
@@ -383,13 +383,17 @@ class OverviewPanel(Container):
     OverviewPanel .left-column {
         width: 50;
         min-width: 45;
+        height: 100%;
+        layout: vertical;
         background: #161B22;
-        border-right: solid #30363D;
+        border-right: heavy #30363D;
         padding: 1;
     }
 
     OverviewPanel .right-column {
         width: 1fr;
+        height: 100%;
+        layout: vertical;
         background: #0D1117;
         padding: 1;
     }
