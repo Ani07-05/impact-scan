@@ -316,6 +316,51 @@ def run_scan(config: schema.ScanConfig) -> schema.ScanResult:
                     "Continuing with existing findings (semantic analysis skipped)"
                 )
 
+        # 3.8. Stack Overflow Solutions Enrichment (optional)
+        if config.enable_stackoverflow_scraper and all_findings:
+            try:
+                from . import stackoverflow_scraper
+
+                logger.info("Enriching findings with Stack Overflow solutions...")
+                enriched_count = 0
+
+                for finding in all_findings:
+                    # Only enrich findings without existing SO solutions
+                    if finding.stackoverflow_fixes:
+                        continue
+
+                    try:
+                        # Search for Stack Overflow solutions
+                        search_query = f"{finding.title} {finding.vuln_id or ''}"
+                        so_answers = stackoverflow_scraper.search_and_scrape_solutions(
+                            query=search_query,
+                            max_results=3  # Limit to top 3 answers
+                        )
+
+                        if so_answers:
+                            finding.stackoverflow_fixes = so_answers
+                            enriched_count += 1
+                            logger.debug(
+                                f"Found {len(so_answers)} SO solutions for: {finding.title}"
+                            )
+
+                    except Exception as e:
+                        logger.debug(
+                            f"Failed to fetch SO solutions for finding: {e}"
+                        )
+                        continue
+
+                if enriched_count > 0:
+                    logger.info(
+                        f"Enriched {enriched_count} findings with Stack Overflow solutions"
+                    )
+                else:
+                    logger.info("No Stack Overflow solutions found for findings")
+
+            except Exception as e:
+                logger.error(f"Stack Overflow enrichment failed: {e}")
+                logger.warning("Continuing without Stack Overflow solutions")
+
         # 4. Get total number of scanned files
         scanned_files_count = len(set(f.file_path for f in all_findings))
 

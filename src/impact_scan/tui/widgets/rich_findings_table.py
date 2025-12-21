@@ -194,6 +194,60 @@ class FindingDetailPanel(Container):
                 else:
                     log.write(f"  [{COLORS['cyan']}]{i}.[/] [{COLORS['muted']}]{citation}[/]")
 
+        # Stack Overflow Solutions
+        if finding.stackoverflow_fixes:
+            log.write("")
+            log.write(f"[{COLORS['green']}]◆ Stack Overflow Solutions:[/]")
+
+            for i, so_answer in enumerate(finding.stackoverflow_fixes[:3], 1):  # Limit to top 3
+                log.write("")
+
+                # Answer header with votes and acceptance
+                header_parts = [f"  [{COLORS['cyan']}]{i}.[/]"]
+
+                if so_answer.accepted:
+                    header_parts.append(f"[{COLORS['green']}]✓ ACCEPTED[/]")
+
+                if so_answer.votes > 0:
+                    header_parts.append(f"[{COLORS['purple']}]↑ {so_answer.votes} votes[/]")
+
+                log.write(" ".join(header_parts))
+
+                # Title
+                if so_answer.title:
+                    log.write(f"     [{COLORS['text']}]{so_answer.title}[/]")
+
+                # Author info
+                if so_answer.author and so_answer.author_reputation:
+                    log.write(
+                        f"     [{COLORS['muted']}]by {so_answer.author} "
+                        f"(rep: {so_answer.author_reputation:,})[/]"
+                    )
+
+                # Explanation (first 200 chars)
+                if so_answer.explanation:
+                    explanation = so_answer.explanation.strip()
+                    if len(explanation) > 200:
+                        explanation = explanation[:200] + "..."
+                    log.write(f"     [{COLORS['muted']}]{explanation}[/]")
+
+                # Code snippets
+                if so_answer.code_snippets:
+                    log.write(f"     [{COLORS['yellow']}]Code Example:[/]")
+                    # Show first code snippet
+                    code_block = so_answer.code_snippets[0]
+                    code = code_block.code.strip()
+                    # Limit code to 5 lines
+                    code_lines = code.split('\n')[:5]
+                    code_preview = '\n'.join(code_lines)
+                    if len(code_block.code.split('\n')) > 5:
+                        code_preview += "\n     ..."
+                    log.write(f"[on #1C1C1C]     {code_preview}[/]")
+
+                # Link
+                if so_answer.url:
+                    log.write(f"     [{COLORS['cyan']}]View on Stack Overflow:[/] [{COLORS['muted']}]{so_answer.url}[/]")
+
     def clear(self) -> None:
         """Clear the detail panel."""
         self.current_finding = None

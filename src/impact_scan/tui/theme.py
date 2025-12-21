@@ -264,8 +264,8 @@ PathBrowserModal {
 }
 
 .browser-container {
-    width: 90;
-    height: 35;
+    width: 100;
+    height: 40;
     background: $surface;
     border: solid $primary;
 }
@@ -277,6 +277,31 @@ PathBrowserModal {
     color: $text;
     padding: 1;
     border-bottom: solid $primary;
+}
+
+.browser-shortcuts {
+    dock: top;
+    height: 5;
+    background: $surface;
+    padding: 1;
+    border-bottom: solid $primary-darken-1;
+    align: center middle;
+}
+
+.shortcut-btn {
+    min-width: 12;
+    max-width: 20;
+    height: 3;
+    margin: 0 1 0 0;
+    background: $surface-lighten-1;
+    color: $text;
+    border: solid $primary-darken-1;
+    content-align: center middle;
+}
+
+.shortcut-btn:hover {
+    background: $primary-darken-1;
+    color: white;
 }
 
 .browser-content {
@@ -291,15 +316,19 @@ PathBrowserModal {
 
 .browser-actions {
     dock: bottom;
-    height: 3;
+    height: 5;
     background: $surface;
     padding: 1;
     border-top: solid $primary;
+    align: center middle;
 }
 
 .action-btn {
-    min-width: 12;
+    min-width: 16;
+    height: 3;
     margin: 0 1;
+    content-align: center middle;
+    text-align: center;
 }
 
 /* API Keys Modal */
@@ -309,8 +338,8 @@ APIKeysModal {
 }
 
 .keys-container {
-    width: 80;
-    height: 30;
+    width: 90;
+    height: 35;
     background: $surface;
     border: solid $primary;
 }
@@ -322,24 +351,37 @@ APIKeysModal {
     color: $text;
     padding: 1;
     border-bottom: solid $primary;
+    text-align: center;
+    text-style: bold;
 }
 
 .keys-content {
     height: 1fr;
     padding: 2;
+    overflow-y: auto;
 }
 
 .keys-actions {
     dock: bottom;
-    height: 3;
+    height: 5;
     background: $surface;
     padding: 1;
     border-top: solid $primary;
+    align: center middle;
+}
+
+.keys-actions .action-btn {
+    min-width: 16;
+    height: 3;
+    margin: 0 1;
+    content-align: center middle;
+    text-align: center;
 }
 
 .key-row {
-    height: 3;
-    margin: 0 0 2 0;
+    height: 4;
+    margin: 0 0 1 0;
+    align: left middle;
 }
 
 .key-label {
@@ -347,16 +389,19 @@ APIKeysModal {
     text-align: right;
     margin-right: 2;
     color: $text-muted;
+    content-align: right middle;
 }
 
 .key-input {
     width: 1fr;
     margin-right: 2;
+    height: 3;
 }
 
 .key-status {
-    width: 10;
+    width: 12;
     text-align: center;
+    content-align: center middle;
 }
 """
 

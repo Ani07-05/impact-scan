@@ -16,6 +16,7 @@ from .messages import (
 )
 from .overview_panel import OverviewPanel, CodebaseTree, ScanInfo, ProgressLog
 from .progress_panel import ProgressPanel
+from .reports_panel import ReportsPanel
 from .rich_findings_table import RichFindingsTable, FindingDetailPanel
 from .rich_metrics_panel import RichMetricsPanel
 
@@ -36,6 +37,7 @@ __all__ = [
     "FindingsExplorer",
     "HistoryPanel",
     "ExportPanel",
+    "ReportsPanel",
     # Rich Widgets
     "RichFindingsTable",
     "FindingDetailPanel",

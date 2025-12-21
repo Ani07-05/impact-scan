@@ -18,6 +18,11 @@ class APIKeysModal(ModalScreen[Dict[str, any]]):
 
     DEFAULT_CSS = MODAL_CSS
 
+    BINDINGS = [
+        ("escape", "dismiss_modal", "Cancel"),
+        ("ctrl+s", "save_keys", "Save"),
+    ]
+
     def compose(self) -> ComposeResult:
         """Compose API keys UI."""
         config_mgr = get_config_manager()
@@ -129,6 +134,14 @@ class APIKeysModal(ModalScreen[Dict[str, any]]):
         if key and len(key) > 10:
             return "[green]Active[/green]"
         return "[red]Missing[/red]"
+
+    def action_dismiss_modal(self) -> None:
+        """Dismiss modal via Escape key."""
+        self.dismiss({"action": "cancelled"})
+
+    def action_save_keys(self) -> None:
+        """Save keys via keyboard shortcut."""
+        self.save_keys()
 
     @on(Button.Pressed, "#save-keys")
     def save_keys(self) -> None:
