@@ -48,6 +48,12 @@ except ImportError:
 # Set up logger
 logger = logging.getLogger(__name__)
 
+# Rich console for consistent output styling
+console = Console()
+
+# Version
+__version__ = "0.3.0"
+
 # Main Typer application instance
 app = typer.Typer(
     name="impact-scan",
@@ -56,8 +62,27 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-# Rich console for consistent output styling
-console = Console()
+
+def version_callback(value: bool):
+    """Print version and exit."""
+    if value:
+        console.print(f"Impact-Scan version {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        None,
+        "--version",
+        "-v",
+        callback=version_callback,
+        is_eager=True,
+        help="Show version and exit",
+    ),
+):
+    """Impact-Scan: AI-powered security vulnerability scanner"""
+    pass
 
 
 def _generate_ignore_rules_yaml(findings: list, limit: int = 50) -> str:
