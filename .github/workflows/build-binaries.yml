@@ -1,0 +1,141 @@
+name: Build Executables
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build'
+        required: false
+        default: 'latest'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows Executable
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller
+
+      - name: Build Windows executable
+        run: |
+          pyinstaller --name=impact-scan --onefile --console src/impact_scan/cli.py
+
+      - name: Test executable
+        run: |
+          dist\impact-scan.exe --version
+
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: impact-scan-windows
+          path: dist/impact-scan.exe
+          retention-days: 90
+
+      - name: Upload to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/impact-scan.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    name: Build Linux Executable
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller
+
+      - name: Build Linux executable
+        run: |
+          pyinstaller --name=impact-scan --onefile --console src/impact_scan/cli.py
+
+      - name: Test executable
+        run: |
+          ./dist/impact-scan --version
+
+      - name: Upload Linux executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: impact-scan-linux
+          path: dist/impact-scan
+          retention-days: 90
+
+      - name: Upload to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/impact-scan
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-macos:
+    name: Build macOS Executable
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller
+
+      - name: Build macOS executable
+        run: |
+          pyinstaller --name=impact-scan --onefile --console src/impact_scan/cli.py
+
+      - name: Test executable
+        run: |
+          ./dist/impact-scan --version
+
+      - name: Upload macOS executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: impact-scan-macos
+          path: dist/impact-scan
+          retention-days: 90
+
+      - name: Upload to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/impact-scan
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
