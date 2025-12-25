@@ -33,6 +33,7 @@ class PythonScanner(EcosystemScanner):
             "Pipfile",
             "Pipfile.lock",
         ]
+        self._original_versions = {}  # Cache for original version strings from manifest
 
     async def detect_manifest_files(self, root_path: Path) -> List[Path]:
         """Find Python dependency manifest files"""
@@ -65,6 +66,14 @@ class PythonScanner(EcosystemScanner):
         Falls back to parsing and manual lookup if OSV-scanner unavailable.
         """
         vulnerabilities = []
+
+        # Parse original versions from manifest to preserve exact version strings
+        self._original_versions = {}
+        try:
+            dependencies = await self._parse_requirements(manifest_path)
+            self._original_versions = {pkg: ver for pkg, ver in dependencies}
+        except Exception:
+            pass  # Continue even if parsing fails
 
         # Try OSV-scanner first (already integrated)
         try:
@@ -185,7 +194,10 @@ class PythonScanner(EcosystemScanner):
         for result in data.get("results", []):
             for package_data in result.get("packages", []):
                 pkg_name = package_data.get("package", {}).get("name", "unknown")
-                pkg_version = package_data.get("package", {}).get("version", "unknown")
+                osv_version = package_data.get("package", {}).get("version", "unknown")
+
+                # Use original version from manifest if available, otherwise use OSV's version
+                pkg_version = self._original_versions.get(pkg_name, osv_version)
 
                 for vuln in package_data.get("vulnerabilities", []):
                     vulnerabilities.append(

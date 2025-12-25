@@ -424,11 +424,12 @@ def run_scan(config: schema.ScanConfig) -> schema.ScanResult:
 
                     try:
                         # Search for Stack Overflow solutions using the Finding object
-                        # This allows the scraper to extract code keywords from the code snippet
-                        # Use longer delay to avoid rate limiting
+                        # The scraper now handles advanced rate limiting internally:
+                        # - Token bucket algorithm for smooth rate limiting
+                        # - Exponential backoff with jitter on 429 errors
+                        # - Circuit breaker to prevent cascading failures
+                        # - Persistent caching to reduce redundant requests
                         scrape_delay = config.stackoverflow_scrape_delay
-                        if scrape_delay < 5.0:
-                            scrape_delay = 5.0  # Minimum 5 seconds to avoid 429 errors
 
                         so_answers = stackoverflow_scraper.search_and_scrape_solutions(
                             finding=finding,
@@ -449,9 +450,12 @@ def run_scan(config: schema.ScanConfig) -> schema.ScanResult:
                         failed_count += 1
                         error_msg = str(e)
                         if "429" in error_msg:
-                            logger.warning(f"Stack Overflow rate limit hit - skipping further searches")
-                            logger.warning("Try again later or use --ai provider for AI-generated fixes instead")
-                            break  # Stop trying if we hit rate limit
+                            logger.warning(
+                                "Stack Overflow rate limit detected - "
+                                "circuit breaker may be active. "
+                                "Will auto-recover in 5 minutes or use --ai for AI-generated fixes"
+                            )
+                            # Don't break - let circuit breaker handle it
                         else:
                             logger.warning(
                                 f"Failed to fetch SO solutions for {finding.title}: {error_msg[:100]}"

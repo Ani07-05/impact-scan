@@ -24,6 +24,8 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from rich.console import Console
 
 from ..utils.schema import Finding, StackOverflowFix, CodeBlock as SchemaCodeBlock
+from ..utils.rate_limiter import AdaptiveRateLimiter
+from ..utils.persistent_cache import PersistentCache
 
 console = Console()
 
@@ -368,6 +370,7 @@ class StackOverflowScraper:
         scrape_delay: float = 4.0,
         max_answers: int = 3,
         include_comments: bool = True,
+        enable_persistent_cache: bool = True,
     ):
         """
         Initialize the Stack Overflow scraper.
@@ -376,30 +379,52 @@ class StackOverflowScraper:
             scrape_delay: Delay in seconds between requests (default: 4.0)
             max_answers: Maximum number of answers to return (default: 3)
             include_comments: Whether to include comments (default: True)
+            enable_persistent_cache: Enable persistent SQLite cache (default: True)
         """
-        self.scrape_delay = scrape_delay
         self.max_answers = max_answers
         self.include_comments = include_comments
+
+        # Initialize adaptive rate limiter (token bucket + exponential backoff + circuit breaker)
+        requests_per_minute = 60.0 / scrape_delay if scrape_delay > 0 else 10.0
+        self.rate_limiter = AdaptiveRateLimiter(
+            requests_per_minute=requests_per_minute,
+            max_burst=3,
+            initial_backoff=1.0,
+            max_backoff=60.0,
+            backoff_multiplier=2.0,
+            circuit_breaker_threshold=3,
+            circuit_breaker_timeout=300.0,  # 5 minutes
+        )
+
+        # Initialize persistent cache
+        self.enable_persistent_cache = enable_persistent_cache
+        if enable_persistent_cache:
+            self.persistent_cache = PersistentCache(
+                cache_dir=Path.home() / ".impact_scan" / "cache",
+                db_name="stackoverflow_cache.db",
+                default_ttl=86400,  # 24 hours
+            )
+        else:
+            self.persistent_cache = None
+
+        # In-memory cache as fallback
         self.cache: Dict[str, List[StackOverflowAnswer]] = {}
         self.max_cache_size = 100
-        self.last_request_time = 0
+
         self.user_agents = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         ]
 
-    def _rate_limit(self):
-        """Implement rate limiting between requests."""
-        current_time = time.time()
-        time_since_last = current_time - self.last_request_time
+    async def _rate_limit(self):
+        """
+        Implement advanced rate limiting with token bucket and circuit breaker.
 
-        if time_since_last < self.scrape_delay:
-            sleep_time = self.scrape_delay - time_since_last
-            console.log(f"[dim]Rate limiting: sleeping {sleep_time:.1f}s[/dim]")
-            time.sleep(sleep_time)
-
-        self.last_request_time = time.time()
+        Returns:
+            True if request can proceed, False if circuit breaker is open
+        """
+        return await self.rate_limiter.acquire()
 
     def _get_cache_key(self, finding: Finding) -> str:
         """Generate cache key for a finding."""
@@ -411,12 +436,75 @@ class StackOverflowScraper:
     def _get_cached_answers(
         self, finding: Finding
     ) -> Optional[List[StackOverflowAnswer]]:
-        """Get cached answers for a finding."""
+        """Get cached answers for a finding (checks persistent cache first, then in-memory)."""
+        cache_key_data = {
+            "vuln_id": finding.vuln_id,
+            "title": finding.title,
+            "file_path": str(finding.file_path),
+        }
+
+        # Try persistent cache first
+        if self.persistent_cache:
+            cached_data = self.persistent_cache.get(cache_key_data)
+            if cached_data:
+                # Deserialize from dict back to StackOverflowAnswer objects
+                answers = []
+                for answer_dict in cached_data:
+                    try:
+                        code_snippets = [
+                            CodeBlock(language=cb["language"], code=cb["code"])
+                            for cb in answer_dict.get("code_snippets", [])
+                        ]
+                        answer = StackOverflowAnswer(
+                            url=answer_dict["url"],
+                            title=answer_dict["title"],
+                            question_id=answer_dict["question_id"],
+                            answer_id=answer_dict["answer_id"],
+                            votes=answer_dict["votes"],
+                            accepted=answer_dict["accepted"],
+                            author=answer_dict["author"],
+                            author_reputation=answer_dict["author_reputation"],
+                            post_date=answer_dict["post_date"],
+                            code_snippets=code_snippets,
+                            explanation=answer_dict["explanation"],
+                            comments=answer_dict.get("comments", []),
+                            score=answer_dict["score"],
+                        )
+                        answers.append(answer)
+                    except (KeyError, TypeError) as e:
+                        console.log(f"[yellow]Warning: Failed to deserialize cached answer: {e}[/yellow]")
+                        continue
+
+                if answers:
+                    console.log(
+                        f"[green][PERSISTENT CACHE HIT] Using cached Stack Overflow answers for {finding.vuln_id}[/green]"
+                    )
+                    return answers
+
+        # Fallback to in-memory cache
         cache_key = self._get_cache_key(finding)
-        return self.cache.get(cache_key)
+        if cache_key in self.cache:
+            console.log(
+                f"[green][MEMORY CACHE HIT] Using cached Stack Overflow answers for {finding.vuln_id}[/green]"
+            )
+            return self.cache[cache_key]
+
+        return None
 
     def _cache_answers(self, finding: Finding, answers: List[StackOverflowAnswer]):
-        """Cache answers for a finding."""
+        """Cache answers for a finding (both persistent and in-memory)."""
+        # Store in persistent cache
+        if self.persistent_cache:
+            cache_key_data = {
+                "vuln_id": finding.vuln_id,
+                "title": finding.title,
+                "file_path": str(finding.file_path),
+            }
+            # Serialize answers to dicts
+            serialized_answers = [answer.to_dict() for answer in answers]
+            self.persistent_cache.set(cache_key_data, serialized_answers)
+
+        # Also store in memory cache for faster access during this session
         cache_key = self._get_cache_key(finding)
 
         # Simple LRU: remove oldest if at capacity
@@ -439,9 +527,6 @@ class StackOverflowScraper:
         # Check cache first
         cached = self._get_cached_answers(finding)
         if cached:
-            console.log(
-                f"[green][CACHE] Using cached Stack Overflow answers for {finding.vuln_id}[/green]"
-            )
             return cached
 
         console.log(
@@ -471,9 +556,17 @@ class StackOverflowScraper:
                     # Scrape each URL
                     all_answers = []
                     for url in so_urls[:5]:  # Limit to top 5 URLs
-                        self._rate_limit()
+                        # Apply rate limiting (token bucket + circuit breaker)
+                        if not await self._rate_limit():
+                            console.log("[yellow]Circuit breaker open - stopping scrape[/yellow]")
+                            break
+
                         answers = await self._scrape_stackoverflow_page(browser, url)
                         all_answers.extend(answers)
+
+                        # Record success for rate limiter
+                        if answers:
+                            self.rate_limiter.record_success()
 
                     # Sort by score and limit
                     all_answers.sort(key=lambda x: x.score, reverse=True)
@@ -729,6 +822,13 @@ class StackOverflowScraper:
                 console.log(f"[dim]Searching via DuckDuckGo: {search_query}[/dim]")
                 response = await client.post(search_url, data=data, headers=headers)
 
+                # Handle rate limiting
+                if response.status_code == 429:
+                    retry_after = response.headers.get("Retry-After")
+                    console.log(f"[yellow]DuckDuckGo rate limit (429) - Retry-After: {retry_after}[/yellow]")
+                    await self.rate_limiter.record_rate_limit(retry_after_header=retry_after)
+                    return []
+
                 if response.status_code != 200:
                     console.log(
                         f"[yellow]DuckDuckGo returned {response.status_code} (might be temporary rate limiting)[/yellow]"
@@ -738,6 +838,7 @@ class StackOverflowScraper:
                     if response.status_code == 202:
                         console.log("[dim]Attempting to parse 202 response...[/dim]")
                     else:
+                        self.rate_limiter.record_failure()
                         return []
 
                 # Parse HTML to extract Stack Overflow URLs
@@ -799,10 +900,18 @@ class StackOverflowScraper:
                 )
                 response = await client.get(search_url, params=params, headers=headers)
 
+                # Handle rate limiting
+                if response.status_code == 429:
+                    retry_after = response.headers.get("Retry-After")
+                    console.log(f"[yellow]Stack Overflow rate limit (429) - Retry-After: {retry_after}[/yellow]")
+                    await self.rate_limiter.record_rate_limit(retry_after_header=retry_after)
+                    raise Exception("429: Rate limit exceeded")
+
                 if response.status_code != 200:
                     console.log(
                         f"[yellow]SO search returned {response.status_code}[/yellow]"
                     )
+                    self.rate_limiter.record_failure()
                     return []
 
                 # Parse search results
@@ -887,6 +996,7 @@ class HybridStackOverflowScraper:
         scrape_delay: float = 4.0,
         max_answers: int = 3,
         method: str = "auto",
+        enable_persistent_cache: bool = True,
     ):
         """
         Initialize hybrid scraper.
@@ -896,11 +1006,13 @@ class HybridStackOverflowScraper:
             scrape_delay: Delay between requests for Playwright
             max_answers: Maximum answers to return
             method: 'parsebot', 'playwright', or 'auto'
+            enable_persistent_cache: Enable persistent SQLite cache (default: True)
         """
         self.parsebot_api_key = parsebot_api_key
         self.scrape_delay = scrape_delay
         self.max_answers = max_answers
         self.method = method
+        self.enable_persistent_cache = enable_persistent_cache
 
         # Statistics
         self.stats = {
@@ -917,7 +1029,17 @@ class HybridStackOverflowScraper:
         self._parsebot_client = None
         self._playwright_scraper = None
 
-        # Cache
+        # Initialize persistent cache
+        if enable_persistent_cache:
+            self.persistent_cache = PersistentCache(
+                cache_dir=Path.home() / ".impact_scan" / "cache",
+                db_name="stackoverflow_cache.db",
+                default_ttl=86400,  # 24 hours
+            )
+        else:
+            self.persistent_cache = None
+
+        # In-memory cache as fallback
         self.cache: Dict[str, List[StackOverflowAnswer]] = {}
 
     async def _get_parsebot_client(self):
@@ -942,7 +1064,9 @@ class HybridStackOverflowScraper:
         """Lazy initialize Playwright scraper"""
         if self._playwright_scraper is None:
             self._playwright_scraper = StackOverflowScraper(
-                scrape_delay=self.scrape_delay, max_answers=self.max_answers
+                scrape_delay=self.scrape_delay,
+                max_answers=self.max_answers,
+                enable_persistent_cache=self.enable_persistent_cache
             )
         return self._playwright_scraper
 
@@ -981,12 +1105,56 @@ class HybridStackOverflowScraper:
         Returns:
             List of StackOverflowAnswer objects
         """
-        # Check cache
+        # Check persistent cache first
+        if self.persistent_cache:
+            cache_key_data = {
+                "vuln_id": finding.vuln_id,
+                "title": finding.title,
+                "file_path": str(finding.file_path),
+            }
+            cached_data = self.persistent_cache.get(cache_key_data)
+            if cached_data:
+                # Deserialize from dict back to StackOverflowAnswer objects
+                answers = []
+                for answer_dict in cached_data:
+                    try:
+                        code_snippets = [
+                            CodeBlock(language=cb["language"], code=cb["code"])
+                            for cb in answer_dict.get("code_snippets", [])
+                        ]
+                        answer = StackOverflowAnswer(
+                            url=answer_dict["url"],
+                            title=answer_dict["title"],
+                            question_id=answer_dict["question_id"],
+                            answer_id=answer_dict["answer_id"],
+                            votes=answer_dict["votes"],
+                            accepted=answer_dict["accepted"],
+                            author=answer_dict["author"],
+                            author_reputation=answer_dict["author_reputation"],
+                            post_date=answer_dict["post_date"],
+                            code_snippets=code_snippets,
+                            explanation=answer_dict["explanation"],
+                            comments=answer_dict.get("comments", []),
+                            score=answer_dict["score"],
+                        )
+                        answers.append(answer)
+                    except (KeyError, TypeError) as e:
+                        console.log(f"[yellow]Warning: Failed to deserialize cached answer: {e}[/yellow]")
+                        continue
+
+                if answers:
+                    self.stats["cache_hits"] += 1
+                    console.log(
+                        f"[green][PERSISTENT CACHE HIT] Using cached answers for {finding.vuln_id}[/green]"
+                    )
+                    return answers
+
+        # Check in-memory cache
         cache_key = self._get_cache_key(finding)
         if cache_key in self.cache:
             self.stats["cache_hits"] += 1
             console.log(
-                f"[green][CACHE] Using cached Stack Overflow answers for {finding.vuln_id}[/green]"
+                f"[green][MEMORY CACHE HIT] Using cached answers for {finding.vuln_id}[/green]"
             )
             return self.cache[cache_key]
 
@@ -999,7 +1167,20 @@ class HybridStackOverflowScraper:
 
             if answers:
                 self.stats["parsebot_successes"] += 1
+
+                # Cache in persistent storage
+                if self.persistent_cache:
+                    cache_key_data = {
+                        "vuln_id": finding.vuln_id,
+                        "title": finding.title,
+                        "file_path": str(finding.file_path),
+                    }
+                    serialized_answers = [answer.to_dict() for answer in answers]
+                    self.persistent_cache.set(cache_key_data, serialized_answers)
+
+                # Cache in memory
                 self.cache[cache_key] = answers
+
                 console.log(
                     f"[bold green][PARSEBOT SUCCESS] Found {len(answers)} answers[/bold green]"
                 )
