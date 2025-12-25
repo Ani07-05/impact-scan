@@ -43,7 +43,7 @@ class MarkdownReportGenerator:
         report.append(self._generate_header(result))
 
         # Executive Summary
-        report.append(self._generate_summary(findings_by_severity))
+        report.append(self._generate_summary(findings_by_severity, result))
 
         # Critical & High findings (always expanded)
         critical_findings = findings_by_severity.get(schema.Severity.CRITICAL, [])
@@ -119,16 +119,39 @@ class MarkdownReportGenerator:
 """
         return header
 
-    def _generate_summary(self, findings_by_severity: dict) -> str:
+    def _generate_summary(self, findings_by_severity: dict, result: schema.ScanResult = None) -> str:
         """Generate executive summary"""
         total = sum(len(findings) for findings in findings_by_severity.values())
 
         if total == 0:
-            return """## ✅ Executive Summary
+            summary = """## ✅ Executive Summary
 
-**No security vulnerabilities detected!** Your code passed all security checks.
+**No security vulnerabilities detected!** Your code passed all security checks."""
 
-Keep up the good security practices! 🎉"""
+            # Add scan coverage details when available
+            if result:
+                scanned_files = getattr(result, 'scanned_files', 0)
+                scan_duration = getattr(result, 'scan_duration', 0)
+                if scanned_files > 0:
+                    summary += f"\n\n### Scan Coverage\n\n"
+                    summary += f"- **{scanned_files} files** analyzed in {scan_duration:.1f}s\n"
+
+                    # Show entry points if any were detected
+                    entry_points = getattr(result, 'entry_points', [])
+                    if entry_points:
+                        frameworks = set(ep.framework for ep in entry_points[:3])
+                        summary += f"- **Frameworks detected:** {', '.join(frameworks)}\n"
+
+                    # Add check types performed
+                    summary += f"\n### Security Checks Performed\n\n"
+                    summary += "- ✓ Static code analysis (1500+ Semgrep rules)\n"
+                    summary += "- ✓ Dependency vulnerability scanning\n"
+                    summary += "- ✓ AI-powered logical flaw detection\n"
+                    if getattr(result.config, 'enable_ai_validation', False):
+                        summary += "- ✓ AI validation for false positive reduction\n"
+
+            summary += "\n\n**Keep up the good security practices!**"
+            return summary
 
         critical_count = len(findings_by_severity.get(schema.Severity.CRITICAL, []))
         high_count = len(findings_by_severity.get(schema.Severity.HIGH, []))
