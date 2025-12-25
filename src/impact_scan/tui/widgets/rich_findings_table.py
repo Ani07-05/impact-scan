@@ -142,10 +142,27 @@ class FindingDetailPanel(Container):
             log.write(f"[on #1C1C1C]{finding.code_snippet}[/]")
             log.write("")
 
-        # AI Fix suggestion
+        # Basic Fix suggestion
         if finding.fix_suggestion:
             log.write(f"[{COLORS['green']}]✓ Suggested Fix:[/]")
             log.write(f"[on #0D2818]{finding.fix_suggestion}[/]")
+            log.write("")
+
+        # AI-Generated Fix (more detailed)
+        if finding.ai_fix:
+            # Check if AI fix was guided by Stack Overflow
+            if finding.stackoverflow_fixes:
+                log.write(f"[{COLORS['cyan']}]◆ AI-Adapted Fix (Based on Stack Overflow):[/]")
+                log.write(f"[{COLORS['muted']}]AI interpreted the top Stack Overflow solution for your code[/]")
+            else:
+                log.write(f"[{COLORS['cyan']}]◆ AI-Generated Fix:[/]")
+            log.write(f"[on #0D1821]{finding.ai_fix}[/]")
+            log.write("")
+
+        # AI Explanation
+        if finding.ai_explanation:
+            log.write(f"[{COLORS['purple']}]◆ AI Analysis:[/]")
+            log.write(f"[on #1A0D21]{finding.ai_explanation}[/]")
             log.write("")
 
         # Rule ID

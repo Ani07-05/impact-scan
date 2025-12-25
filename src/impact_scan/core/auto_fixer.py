@@ -526,12 +526,15 @@ def run_tests(
 
     try:
         logger.info(f"Running tests: {test_command}")
+        # Split command for safe execution without shell=True
+        import shlex
+        cmd_list = shlex.split(test_command) if isinstance(test_command, str) else test_command
         result = subprocess.run(
-            test_command,
+            cmd_list,
             cwd=project_root,
             capture_output=True,
             text=True,
-            shell=True,
+            shell=False,
             timeout=300,  # 5 minute timeout
         )
 

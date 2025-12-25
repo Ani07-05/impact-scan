@@ -3,7 +3,9 @@ import logging
 import re
 import time
 from pathlib import Path
+import asyncio
 from typing import Iterator, List
+
 
 from ..utils import paths, schema
 from . import dep_audit, fix_ai, project_classifier, static_scan, repo_graph_integration
@@ -11,6 +13,78 @@ from ..agents import StaticAnalysisAgent, ComprehensiveSecurityCrawler, AgentRes
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+
+def _run_secret_detection_scan(config: schema.ScanConfig) -> List[schema.Finding]:
+    """Extract and run secret detection scan."""
+    try:
+        logger.info("Running secret detection scan...")
+        from . import repo_analyzer
+        analyzer = repo_analyzer.RepoAnalyzer(config.root_path)
+        analysis = analyzer.analyze()
+        secrets = analysis.get('secrets_found', [])
+
+        if not secrets:
+            return []
+
+        logger.warning(f"Found {len(secrets)} exposed secrets!")
+        findings = []
+        severity_map = {
+            'CRITICAL': schema.Severity.CRITICAL,
+            'HIGH': schema.Severity.HIGH,
+            'MEDIUM': schema.Severity.MEDIUM,
+            'LOW': schema.Severity.LOW,
+        }
+
+        for secret in secrets:
+            finding = schema.Finding(
+                rule_id=f"secret-{secret['type']}",
+                vuln_id=f"CWE-798-{secret['type']}",
+                title=f"Exposed Secret: {secret['description']}",
+                severity=severity_map.get(secret['severity'], schema.Severity.HIGH),
+                source=schema.VulnSource.STATIC_ANALYSIS,
+                code_snippet=secret.get('line_content', '[secret content redacted]'),
+                description=f"{secret['description']}. Found in {secret['file']} at line {secret['line']}. "
+                           f"Hardcoded secrets should never be committed to version control.",
+                file_path=Path(config.root_path) / secret['file'],
+                line_number=secret['line'],
+                fix_suggestion="1. Remove the hardcoded secret from your code\n"
+                              "2. Use environment variables instead\n"
+                              "3. Add .env files to .gitignore\n"
+                              "4. Rotate the compromised key immediately",
+                metadata={
+                    "cwe_id": "CWE-798",
+                    "category": "secrets",
+                    "secret_type": secret['type'],
+                    "masked_value": secret.get('masked_value', '***'),
+                },
+            )
+            findings.append(finding)
+        return findings
+    except Exception as e:
+        logger.error(f"Secret detection scan failed: {e}")
+        return []
+
+
+def _filter_findings_by_severity(findings: List[schema.Finding], config: schema.ScanConfig) -> List[schema.Finding]:
+    """Filter findings by minimum severity threshold."""
+    if not config.min_severity:
+        return findings
+
+    logger.info(f"Filtering findings by minimum severity: {config.min_severity}")
+    severity_levels = {
+        schema.Severity.LOW: 0,
+        schema.Severity.MEDIUM: 1,
+        schema.Severity.HIGH: 2,
+        schema.Severity.CRITICAL: 3,
+    }
+    min_level = severity_levels.get(config.min_severity, 0)
+
+    original_count = len(findings)
+    filtered = [f for f in findings if severity_levels.get(f.severity, -1) >= min_level]
+
+    logger.info(f"Filtered {original_count} findings to {len(filtered)} based on severity threshold")
+    return filtered
 
 
 class EntryPointDetector(abc.ABC):
@@ -148,66 +222,59 @@ def run_scan(config: schema.ScanConfig) -> schema.ScanResult:
         all_findings = []
 
         # 2.1. Secret detection scan (fast, always runs first)
-        try:
-            logger.info("Running secret detection scan...")
-            from . import repo_analyzer
-            analyzer = repo_analyzer.RepoAnalyzer(config.root_path)
-            analysis = analyzer.analyze()
-            secrets = analysis.get('secrets_found', [])
-            
-            if secrets:
-                logger.warning(f"Found {len(secrets)} exposed secrets!")
-                for secret in secrets:
-                    # Convert secret to Finding
-                    severity_map = {
-                        'CRITICAL': schema.Severity.CRITICAL,
-                        'HIGH': schema.Severity.HIGH,
-                        'MEDIUM': schema.Severity.MEDIUM,
-                        'LOW': schema.Severity.LOW,
-                    }
-                    finding = schema.Finding(
-                        rule_id=f"secret-{secret['type']}",
-                        vuln_id=f"CWE-798-{secret['type']}",
-                        title=f"Exposed Secret: {secret['description']}",
-                        severity=severity_map.get(secret['severity'], schema.Severity.HIGH),
-                        source=schema.VulnSource.STATIC_ANALYSIS,
-                        code_snippet=secret.get('line_content', '[secret content redacted]'),
-                        description=f"{secret['description']}. Found in {secret['file']} at line {secret['line']}. "
-                                   f"Hardcoded secrets should never be committed to version control.",
-                        file_path=Path(config.root_path) / secret['file'],
-                        line_number=secret['line'],
-                        fix_suggestion="1. Remove the hardcoded secret from your code\n"
-                                      "2. Use environment variables instead\n"
-                                      "3. Add .env files to .gitignore\n"
-                                      "4. Rotate the compromised key immediately",
-                        metadata={
-                            "cwe_id": "CWE-798",
-                            "category": "secrets",
-                            "secret_type": secret['type'],
-                            "masked_value": secret.get('masked_value', '***'),
-                        },
-                    )
-                    all_findings.append(finding)
-        except Exception as e:
-            logger.error(f"Secret detection scan failed: {e}")
+        secret_findings = _run_secret_detection_scan(config)
+        all_findings.extend(secret_findings)
 
         # 2.2. Static analysis scan
         try:
             logger.info("Running static analysis scan (Agent-based)...")
-            
+            logger.info(f"Scan target: {config.root_path}")
+            logger.info(f"Target exists: {config.root_path.exists()}")
+
             # Initialize Agent
             agent = StaticAnalysisAgent(name="static_analyser", config=config)
-            
-            # Execute Agent (wrap in asyncio for sync context)
-            import asyncio
-            agent_result = asyncio.run(agent.execute(config.root_path, context={"project": project_context}))
-            
-            if agent_result and agent_result.findings:
-                static_findings = agent_result.findings
-                all_findings.extend(static_findings)
+            logger.info(f"Agent initialized: {agent.name}")
+
+            # Run agent - handle both sync and async contexts
+            try:
+                # Try to get the running event loop
+                loop = asyncio.get_running_loop()
+                # We're already in an async context (e.g., TUI with @work decorator)
+                # Run in a new thread with its own event loop
+                import concurrent.futures
+                import threading
+
+                def run_in_new_loop():
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        return new_loop.run_until_complete(
+                            agent.execute(config.root_path, context={"project": project_context})
+                        )
+                    finally:
+                        new_loop.close()
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    agent_result = pool.submit(run_in_new_loop).result()
+            except RuntimeError:
+                # No event loop running, we're in a pure sync context (CLI)
+                agent_result = asyncio.run(agent.execute(config.root_path, context={"project": project_context}))
+
+            logger.info(f"Agent completed with status: {agent_result.status}")
+            logger.info(f"Agent found {len(agent_result.findings)} findings")
+
+            if not agent_result.success:
+                raise RuntimeError(
+                    f"Static analysis agent failed: {agent_result.error_message}"
+                )
+            all_findings.extend(agent_result.findings)
+            logger.info(f"Total findings after static analysis: {len(all_findings)}")
         except Exception as e:
             logger.error(f"Static analysis scan failed: {e}")
-
+            logger.exception("Full traceback:")
+            # Don't raise - allow scan to continue with other phases
+            # The error is already logged for debugging
+        
         # 2.3. Dependency audit scan
         try:
             logger.info("Running dependency audit scan...")
@@ -217,28 +284,7 @@ def run_scan(config: schema.ScanConfig) -> schema.ScanResult:
             logger.error(f"Dependency audit scan failed: {e}")
 
         # 3. Filter findings by minimum severity
-        if config.min_severity:
-            logger.info(
-                f"Filtering findings by minimum severity: {config.min_severity}"
-            )
-            severity_levels = {
-                schema.Severity.LOW: 0,
-                schema.Severity.MEDIUM: 1,
-                schema.Severity.HIGH: 2,
-                schema.Severity.CRITICAL: 3,
-            }
-            min_level = severity_levels.get(config.min_severity, 0)
-
-            original_count = len(all_findings)
-            filtered_findings = [
-                f
-                for f in all_findings
-                if severity_levels.get(f.severity, -1) >= min_level
-            ]
-            all_findings = filtered_findings
-            logger.info(
-                f"Filtered {original_count} findings to {len(all_findings)} based on severity threshold"
-            )
+        all_findings = _filter_findings_by_severity(all_findings, config)
 
         # 3.25. Cheap context-aware filtering using KnowledgeGraph before AI
         if kg and all_findings:
@@ -367,7 +413,9 @@ def run_scan(config: schema.ScanConfig) -> schema.ScanResult:
                 from . import stackoverflow_scraper
 
                 logger.info("Enriching findings with Stack Overflow solutions...")
+                logger.info(f"Attempting to enrich {len(all_findings)} findings...")
                 enriched_count = 0
+                failed_count = 0
 
                 for finding in all_findings:
                     # Only enrich findings without existing SO solutions
@@ -375,35 +423,51 @@ def run_scan(config: schema.ScanConfig) -> schema.ScanResult:
                         continue
 
                     try:
-                        # Search for Stack Overflow solutions
-                        search_query = f"{finding.title} {finding.vuln_id or ''}"
+                        # Search for Stack Overflow solutions using the Finding object
+                        # This allows the scraper to extract code keywords from the code snippet
+                        # Use longer delay to avoid rate limiting
+                        scrape_delay = config.stackoverflow_scrape_delay
+                        if scrape_delay < 5.0:
+                            scrape_delay = 5.0  # Minimum 5 seconds to avoid 429 errors
+
                         so_answers = stackoverflow_scraper.search_and_scrape_solutions(
-                            query=search_query,
-                            max_results=3  # Limit to top 3 answers
+                            finding=finding,
+                            max_results=config.stackoverflow_max_answers or 3,
+                            scrape_delay=scrape_delay
                         )
 
                         if so_answers:
                             finding.stackoverflow_fixes = so_answers
                             enriched_count += 1
-                            logger.debug(
-                                f"Found {len(so_answers)} SO solutions for: {finding.title}"
+                            logger.info(
+                                f"✓ Found {len(so_answers)} SO solutions for: {finding.title}"
                             )
+                        else:
+                            logger.debug(f"No SO solutions found for: {finding.title}")
 
                     except Exception as e:
-                        logger.debug(
-                            f"Failed to fetch SO solutions for finding: {e}"
-                        )
+                        failed_count += 1
+                        error_msg = str(e)
+                        if "429" in error_msg:
+                            logger.warning(f"Stack Overflow rate limit hit - skipping further searches")
+                            logger.warning("Try again later or use --ai provider for AI-generated fixes instead")
+                            break  # Stop trying if we hit rate limit
+                        else:
+                            logger.warning(
+                                f"Failed to fetch SO solutions for {finding.title}: {error_msg[:100]}"
+                            )
                         continue
 
                 if enriched_count > 0:
                     logger.info(
-                        f"Enriched {enriched_count} findings with Stack Overflow solutions"
+                        f"✓ Enriched {enriched_count} findings with Stack Overflow solutions"
                     )
                 else:
-                    logger.info("No Stack Overflow solutions found for findings")
+                    logger.warning(f"No Stack Overflow solutions found for findings (failed: {failed_count})")
 
             except Exception as e:
                 logger.error(f"Stack Overflow enrichment failed: {e}")
+                logger.exception("Full traceback:")
                 logger.warning("Continuing without Stack Overflow solutions")
 
         # 4. Get total number of scanned files

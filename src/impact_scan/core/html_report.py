@@ -330,8 +330,9 @@ class SecurityReportGenerator:
                         {highlighted_snippet}
                     </div>
                     <div class="grid-item">
-                        <h4><i class="fas fa-shield-alt"></i> Secure Code Fix</h4>
+                        <h4><i class="fas fa-shield-alt"></i> Secure Code Fix {"<span style='background: #F48024; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; margin-left: 8px;'><i class='fab fa-stack-overflow'></i> AI + Stack Overflow</span>" if finding.ai_fix and finding.stackoverflow_fixes else ""}</h4>
                         {highlighted_fix if highlighted_fix else "<p>No fix suggestion available.</p>"}
+                        {"<p style='color: #F48024; font-size: 0.9em; margin-top: 8px;'><i class='fas fa-info-circle'></i> This fix was AI-generated based on community-validated Stack Overflow solutions, adapted for your specific codebase.</p>" if finding.ai_fix and finding.stackoverflow_fixes else ""}
                     </div>
                 </div>
 

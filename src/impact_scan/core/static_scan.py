@@ -11,6 +11,10 @@ from ..utils import schema
 # Set up logging
 logger = logging.getLogger(__name__)
 
+# Configuration constants
+SEMGREP_TIMEOUT_SECONDS = 600  # 10 minutes for larger repos
+BANDIT_TIMEOUT_SECONDS = 300   # 5 minutes timeout
+
 
 def _select_semgrep_rules(project_context, local_rules_path: Path, scan_root: Path = None) -> List[str]:
     """
@@ -173,7 +177,7 @@ def run_semgrep_scan(root_path: Path, project_context=None) -> List[schema.Findi
                 encoding="utf-8",
                 errors="replace",
                 shell=False,
-                timeout=600,  # 10 minute timeout for larger repos
+                timeout=SEMGREP_TIMEOUT_SECONDS,
             )
 
         # Handle Semgrep exit codes
@@ -221,6 +225,8 @@ def _parse_semgrep_output(json_output: str, root_path: Path) -> List[schema.Find
 
             extra = result.get("extra", {})
             metadata = extra.get("metadata", {})
+            citations = metadata.get("references", [])
+
 
             severity = _map_semgrep_severity(extra.get("severity", "INFO"))
 
@@ -231,6 +237,7 @@ def _parse_semgrep_output(json_output: str, root_path: Path) -> List[schema.Find
                 rule_id=result.get("check_id"),
                 title=result.get("check_id").split(".")[-1].replace("-", " ").title(),
                 severity=severity,
+                citations=citations,
                 source=schema.VulnSource.STATIC_ANALYSIS,
                 code_snippet=extra.get("lines", ""),
                 description=extra.get("message", ""),
@@ -287,7 +294,7 @@ def run_bandit_scan(root_path: Path) -> List[schema.Finding]:
             text=True,
             shell=False,
             env=clean_env,
-            timeout=300,
+            timeout=BANDIT_TIMEOUT_SECONDS,
         )
 
         if proc.stdout:

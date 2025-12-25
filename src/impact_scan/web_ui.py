@@ -812,6 +812,9 @@ HTML_TEMPLATE = """
 def index():
     """Main web interface."""
     current_path = str(Path.cwd())
+    # nosemgrep: python.flask.security.audit.render-template-string
+    # HTML_TEMPLATE is a constant literal string, not user input.
+    # current_path is passed as a Jinja2 variable and auto-escaped.
     return render_template_string(HTML_TEMPLATE, current_path=current_path)
 
 

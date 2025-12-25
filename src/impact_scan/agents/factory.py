@@ -8,6 +8,7 @@ configuration and automatic tool detection.
 
 import importlib
 import inspect
+import logging
 import os
 import pkgutil
 from pathlib import Path
@@ -15,6 +16,8 @@ from typing import Any, Callable, Dict, List, Optional, Type
 
 from ..utils.schema import ScanConfig
 from .base import Agent, MultiModelAgent
+
+logger = logging.getLogger(__name__)
 
 
 class AgentFactory:
@@ -186,11 +189,11 @@ class AgentFactory:
                             )
 
                 except Exception as e:
-                    print(f"[FACTORY] Failed to import {module_info.name}: {e}")
+                    logger.warning(f"[FACTORY] Failed to import {module_info.name}: {e}")
                     continue
 
         except Exception as e:
-            print(f"[FACTORY] Failed to discover agents: {e}")
+            logger.warning(f"[FACTORY] Failed to discover agents: {e}")
 
         if skipped > 0:
             print(

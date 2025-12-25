@@ -1,5 +1,6 @@
 import fnmatch
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
@@ -19,6 +20,8 @@ from sarif_om import (
 )
 
 from ..utils import schema
+
+logger = logging.getLogger(__name__)
 
 
 def merge_and_dedupe(*findings_lists: List[schema.Finding]) -> List[schema.Finding]:
@@ -185,6 +188,21 @@ def save_to_json(scan_result: schema.ScanResult, output_path: Path) -> None:
                     "fix_suggestion": f.fix_suggestion,
                     "ai_fix": f.ai_fix,
                     "source": f.source.value,
+                    "stackoverflow_fixes": [
+                        {
+                            "url": fix.url,
+                            "title": fix.title,
+                            "votes": fix.votes,
+                            "accepted": fix.accepted,
+                            "author": fix.author,
+                            "explanation": fix.explanation,
+                            "code_snippets": [
+                                {"language": cb.language, "code": cb.code}
+                                for cb in fix.code_snippets
+                            ],
+                        }
+                        for fix in (f.stackoverflow_fixes or [])
+                    ] if f.stackoverflow_fixes else None,
                 }
                 for f in scan_result.findings
             ],

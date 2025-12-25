@@ -26,6 +26,8 @@ class TUIState(BaseModel):
 
     first_run: bool = True
     tutorial_completed: bool = False
+    repo_analysis_completed: bool = False
+    last_analyzed_repo: Optional[str] = None
     last_scan_path: Optional[str] = None
     preferred_profile: str = "standard"
     preferred_ai_provider: str = "auto"
@@ -76,6 +78,16 @@ class TUIConfigManager:
         self.state.first_run = False
         self.state.tutorial_completed = True
         self.save_state()
+
+    def mark_repo_analysis_complete(self, repo_path: str) -> None:
+        """Mark repository analysis as completed."""
+        self.state.repo_analysis_completed = True
+        self.state.last_analyzed_repo = str(repo_path)
+        self.save_state()
+
+    def has_completed_repo_analysis(self) -> bool:
+        """Check if user has ever completed repo analysis."""
+        return self.state.repo_analysis_completed
 
     def update_last_scan_path(self, path: str) -> None:
         """Update last scanned path."""

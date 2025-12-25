@@ -32,7 +32,78 @@ Vulnerable Code from `{file_path}` at line {line_number}:
 Respond with the unified diff to fix the vulnerability.
 """
 
-    @abc.abstractmethod
+    _SO_GUIDED_PROMPT_TEMPLATE = """
+You are an expert security engineer. Your task is to adapt a Stack Overflow solution to fix a specific vulnerability in the user's codebase.
+
+IMPORTANT: Base your fix on the Stack Overflow solution provided below, but adapt it to the user's specific code context.
+
+Vulnerability Details:
+- ID: {vuln_id}
+- Title: {title}
+- Description: {description}
+
+User's Vulnerable Code from `{file_path}` at line {line_number}:
+{code_snippet}
+
+Stack Overflow Community Solution:
+{stackoverflow_solution}
+
+Your task:
+1. Review the Stack Overflow solution carefully
+2. Adapt it to fix the user's specific vulnerable code above
+3. Provide a fix in standard unified diff format ONLY
+4. Do not add explanations, conversational text, or markdown code fences
+
+Respond with the unified diff that applies the Stack Overflow solution to the user's code.
+"""
+
+    def _format_stackoverflow_solution(self, finding: schema.Finding) -> Optional[str]:
+        """Format Stack Overflow solutions for inclusion in AI prompt."""
+        if not finding.stackoverflow_fixes or len(finding.stackoverflow_fixes) == 0:
+            return None
+
+        # Use the top-voted/accepted answer
+        top_answer = finding.stackoverflow_fixes[0]
+
+        solution_text = f"Answer from Stack Overflow (Votes: {top_answer.votes}"
+        if top_answer.accepted:
+            solution_text += ", ACCEPTED"
+        solution_text += f", by {top_answer.author}):\n\n"
+
+        # Include the answer explanation
+        if top_answer.answer_text:
+            solution_text += f"{top_answer.answer_text[:500]}\n\n"
+
+        # Include code snippets
+        if top_answer.code_snippets:
+            solution_text += "Code from Stack Overflow:\n"
+            for i, code in enumerate(top_answer.code_snippets[:2], 1):  # Top 2 code blocks
+                solution_text += f"\nCode Block {i}:\n{code}\n"
+
+        solution_text += f"\nSource: {top_answer.url}"
+
+        return solution_text
+
+    def generate_fix(self, finding: schema.Finding) -> str:
+        """
+        Generate fix for a finding, optionally guided by Stack Overflow solutions.
+        This method is now in the base class to avoid duplication across providers.
+        """
+        so_solution = self._format_stackoverflow_solution(finding)
+
+        if so_solution:
+            # Use SO-guided template - AI adapts community solution
+            prompt_data = finding.model_dump()
+            prompt_data['stackoverflow_solution'] = so_solution
+            prompt = self._SO_GUIDED_PROMPT_TEMPLATE.format(**prompt_data)
+            logger.info(f"Using Stack Overflow-guided AI fix for: {finding.title}")
+        else:
+            # Fall back to pure AI fix generation
+            prompt = self._PROMPT_TEMPLATE.format(**finding.model_dump())
+            logger.debug(f"Using pure AI fix generation for: {finding.title}")
+
+        return self.generate_content(prompt)
+
     @abc.abstractmethod
     def generate_content(self, prompt: str) -> str:
         """Generates content for a given prompt."""
@@ -45,10 +116,6 @@ class OpenAIFixProvider(AIFixProvider):
 
         self.client = openai.OpenAI(api_key=api_key)
         self.openai_module = openai
-
-    def generate_fix(self, finding: schema.Finding) -> str:
-        prompt = self._PROMPT_TEMPLATE.format(**finding.model_dump())
-        return self.generate_content(prompt)
 
     def generate_content(self, prompt: str) -> str:
         try:
@@ -68,10 +135,6 @@ class AnthropicFixProvider(AIFixProvider):
 
         self.client = anthropic.Anthropic(api_key=api_key)
         self.anthropic_module = anthropic
-
-    def generate_fix(self, finding: schema.Finding) -> str:
-        prompt = self._PROMPT_TEMPLATE.format(**finding.model_dump())
-        return self.generate_content(prompt)
 
     def generate_content(self, prompt: str) -> str:
         try:
@@ -93,10 +156,6 @@ class GeminiFixProvider(AIFixProvider):
 
         self.client = genai.Client(api_key=api_key)
 
-    def generate_fix(self, finding: schema.Finding) -> str:
-        prompt = self._PROMPT_TEMPLATE.format(**finding.model_dump())
-        return self.generate_content(prompt)
-
     def generate_content(self, prompt: str) -> str:
         try:
             response = self.client.models.generate_content(
@@ -112,10 +171,6 @@ class GroqFixProvider(AIFixProvider):
         from groq import Groq
 
         self.client = Groq(api_key=api_key)
-
-    def generate_fix(self, finding: schema.Finding) -> str:
-        prompt = self._PROMPT_TEMPLATE.format(**finding.model_dump())
-        return self.generate_content(prompt)
 
     def generate_content(self, prompt: str) -> str:
         try:

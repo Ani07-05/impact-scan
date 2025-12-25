@@ -77,7 +77,16 @@ class PathBrowserModal(ModalScreen[str]):
     @on(Button.Pressed, "#select-path")
     def select_path(self) -> None:
         """Select current path and close modal."""
-        self.dismiss(str(self.selected_path))
+        tree = self.query_one("#path-tree", DirectoryTree)
+
+        # Get the currently highlighted node in the tree
+        if tree.cursor_node and tree.cursor_node.data:
+            # Use the path of the currently highlighted/cursor node
+            selected = Path(tree.cursor_node.data.path)
+            self.dismiss(str(selected))
+        else:
+            # Fallback to selected_path or tree's root path
+            self.dismiss(str(self.selected_path))
 
     @on(Button.Pressed, "#go-back")
     def go_back(self) -> None:

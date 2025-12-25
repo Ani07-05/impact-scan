@@ -117,6 +117,10 @@ class CodebaseTree(Container):
 
     def load_path(self, path: Path) -> Dict:
         """Load codebase and return stats."""
+        # If already loaded for this path, just return cached stats
+        if self.current_path == path and self.stats:
+            return self.stats
+
         self.current_path = path
         stats = self._analyze_codebase(path)
         self.stats = stats
@@ -130,7 +134,7 @@ class CodebaseTree(Container):
 
         # Remove existing tree if it exists
         try:
-            old_tree = self.query_one("#code-tree")
+            old_tree = self.query_one("#code-tree", Tree)
             old_tree.remove()
         except Exception:
             pass

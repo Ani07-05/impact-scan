@@ -121,7 +121,7 @@ class ParseBotClient:
 
     def _get_cache_path(self, url: str) -> Path:
         """Get cache file path for URL"""
-        url_hash = hashlib.md5(url.encode()).hexdigest()
+        url_hash = hashlib.sha256(url.encode()).hexdigest()
         return self.cache_dir / f"parsebot_{url_hash}.json"
 
     async def _check_cache(self, url: str, max_age_hours: int = 168) -> Optional[Dict]:

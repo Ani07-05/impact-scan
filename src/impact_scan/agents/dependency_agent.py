@@ -8,6 +8,7 @@ Uses UnifiedDependencyScanner for multi-ecosystem support (Python, JavaScript, e
 """
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Union
 
@@ -15,6 +16,8 @@ from ..core.dep_audit import audit_dependencies
 from ..core.unified_dependency_scanner import UnifiedDependencyScanner
 from ..utils.schema import Finding, ScanConfig, Severity
 from .base import AgentResult, MultiModelAgent
+
+logger = logging.getLogger(__name__)
 
 
 class DependencyAgent(MultiModelAgent):
@@ -49,12 +52,12 @@ class DependencyAgent(MultiModelAgent):
         if not target_path.exists():
             raise ValueError(f"Target path does not exist: {target_path}")
 
-        print(f"[{self.name}] Starting dependency analysis of: {target_path}")
+        logger.info(f"[{self.name}] Starting dependency analysis of: {target_path}")
 
         # Step 1: Discover dependency files
         dep_files = await self._discover_dependency_files(target_path)
         if not dep_files:
-            print(f"[{self.name}] No dependency files found")
+            logger.info(f"[{self.name}] No dependency files found")
             result.data["dependency_files"] = []
             result.findings = []
             return
@@ -83,7 +86,7 @@ class DependencyAgent(MultiModelAgent):
             }
         )
 
-        print(f"[{self.name}] Completed analysis: {len(findings)} vulnerabilities")
+        logger.info(f"[{self.name}] Completed analysis: {len(findings)} vulnerabilities")
 
     async def _discover_dependency_files(self, target_path: Path) -> List[Path]:
         """Discover dependency manifest files in the project"""
@@ -130,10 +133,10 @@ class DependencyAgent(MultiModelAgent):
         ecosystems = self._detect_ecosystems(dep_files)
 
         if not ecosystems:
-            print(f"[{self.name}] No supported ecosystems detected")
+            logger.info(f"[{self.name}] No supported ecosystems detected")
             return []
 
-        print(f"[{self.name}] Detected ecosystems: {', '.join(ecosystems)}")
+        logger.info(f"[{self.name}] Detected ecosystems: {', '.join(ecosystems)}")
 
         # Get root path (parent of first dep file)
         root_path = dep_files[0].parent if dep_files else Path.cwd()
@@ -164,8 +167,8 @@ class DependencyAgent(MultiModelAgent):
             return filtered_findings
 
         except Exception as e:
-            print(f"[{self.name}] UnifiedDependencyScanner failed: {e}")
-            print(f"[{self.name}] Falling back to legacy dep_audit...")
+            logger.info(f"[{self.name}] UnifiedDependencyScanner failed: {e}")
+            logger.info(f"[{self.name}] Falling back to legacy dep_audit...")
 
             # Fallback to legacy scanning
             return await self._legacy_scan_dependencies(dep_files, result)
@@ -220,7 +223,7 @@ class DependencyAgent(MultiModelAgent):
         all_findings = []
 
         for dep_file in dep_files:
-            print(f"[{self.name}] Scanning {dep_file.name}...")
+            logger.info(f"[{self.name}] Scanning {dep_file.name}...")
 
             try:
                 # Use existing dependency audit functionality
@@ -243,7 +246,7 @@ class DependencyAgent(MultiModelAgent):
                 )
 
             except Exception as e:
-                print(f"[{self.name}] Failed to scan {dep_file}: {e}")
+                logger.info(f"[{self.name}] Failed to scan {dep_file}: {e}")
                 continue
 
         return all_findings

@@ -29,7 +29,7 @@ class ConfigPanel(Container):
     DEFAULT_CSS = """
     ConfigPanel {
         height: auto;
-        min-height: 25;
+        min-height: 18;
         background: #161B22;
         padding: 1;
         border: round #30363D;
@@ -37,7 +37,8 @@ class ConfigPanel(Container):
     }
 
     ConfigPanel .config-row {
-        height: 3;
+        height: auto;
+        min-height: 3;
         margin: 0 0 1 0;
     }
 
@@ -74,10 +75,12 @@ class ConfigPanel(Container):
     }
 
     ConfigPanel .mini-btn {
-        width: 5;
+        width: auto;
+        min-width: 10;
+        max-width: 20;
         height: 3;
         margin-left: 1;
-        min-width: 5;
+        padding: 0 2;
         background: #21262D;
         color: #FFA657;
         border: round #373E47;
@@ -119,12 +122,12 @@ class ConfigPanel(Container):
     ConfigPanel .ai-row {
         height: auto;
         margin: 0 0 1 0;
-        padding: 0 1;
+        padding: 0;
     }
 
     ConfigPanel Checkbox {
         background: transparent;
-        padding: 0;
+        padding: 0 1;
         width: 100%;
     }
 
@@ -188,7 +191,7 @@ class ConfigPanel(Container):
                 classes="config-select",
             )
             yield Button(
-                "🔑",
+                "API Keys",
                 variant="default",
                 id="keys-btn",
                 classes="mini-btn",
@@ -198,7 +201,7 @@ class ConfigPanel(Container):
             yield Checkbox("AI Validation (reduce false positives)", id="ai-validation-check", value=True)
 
         yield Button(
-            "▶ Start Scan",
+            "Start Scan",
             variant="success",
             id="start-scan-btn",
             classes="scan-button",
@@ -219,11 +222,16 @@ class ConfigPanel(Container):
     def set_scan_path(self, path: str) -> None:
         """Set the scan path value."""
         self._scan_path = path
-        # Update browse button text
+        # Update browse button text with truncation for long paths
         try:
             btn = self.query_one("#browse-btn", Button)
             name = Path(path).name or path
-            btn.label = f"{name}"
+
+            # Truncate long paths for button display
+            if len(name) > 30:
+                name = f"...{name[-27:]}"
+
+            btn.label = f"Folder: {name}"
         except Exception:
             pass
 

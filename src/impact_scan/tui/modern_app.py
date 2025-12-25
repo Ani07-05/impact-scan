@@ -114,8 +114,29 @@ class ModernImpactScanTUI(App):
 
     def on_mount(self) -> None:
         """Initialize the app when mounted."""
-        self.log_message("Impact Scan v0.3.0 initialized", "green")
-        self.log_message("Ready to scan codebases for security vulnerabilities", "cyan")
+        from .config import get_config_manager
+        config_mgr = get_config_manager()
+
+        if config_mgr.state.first_run:
+            # Show onboarding flow
+            self._show_onboarding_flow()
+        else:
+            # Normal startup
+            self.log_message("Impact Scan v0.3.0 initialized", "green")
+            self.log_message("Ready to scan codebases for security vulnerabilities", "cyan")
+
+    def _show_onboarding_flow(self) -> None:
+        """Display onboarding screens as modals."""
+        from .onboarding import WelcomeScreen
+        from .config import get_config_manager
+
+        def on_onboarding_complete(result) -> None:
+            config_mgr = get_config_manager()
+            config_mgr.mark_tutorial_complete()
+            self.log_message("Impact Scan v0.3.0 initialized", "green")
+            self.log_message("Setup complete! Ready to scan", "cyan")
+
+        self.push_screen(WelcomeScreen(), on_onboarding_complete)
 
     def log_message(self, message: str, style: str = "cyan") -> None:
         """Log a message to the activity log."""
@@ -123,8 +144,8 @@ class ModernImpactScanTUI(App):
             overview = self.query_one(OverviewPanel)
             log_widget = overview.query_one(ProgressLog)
             log_widget.log(message, style)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.error(f"Failed to log message: {e}")
 
     @on(TabbedContent.TabActivated)
     def tab_changed(self, event: TabbedContent.TabActivated) -> None:
@@ -138,8 +159,8 @@ class ModernImpactScanTUI(App):
         try:
             tabs = self.query_one(TabbedContent)
             tabs.active = tab_id
-        except Exception:
-            pass
+        except Exception as e:
+            logging.error(f"Failed to switch tab to '{tab_id}': {e}")
 
     @on(Button.Pressed, "#browse-btn")
     def on_browse_button(self, event: Button.Pressed) -> None:
@@ -156,6 +177,21 @@ class ModernImpactScanTUI(App):
         """Handle start scan button press."""
         self.action_start_scan()
 
+    @on(Button.Pressed, "#export-html-btn")
+    def on_export_html_button(self, event: Button.Pressed) -> None:
+        """Handle HTML export button press."""
+        self.action_export_html()
+
+    @on(Button.Pressed, "#export-sarif-btn")
+    def on_export_sarif_button(self, event: Button.Pressed) -> None:
+        """Handle SARIF export button press."""
+        self.action_export_sarif()
+
+    @on(Button.Pressed, "#export-md-btn")
+    def on_export_md_button(self, event: Button.Pressed) -> None:
+        """Handle Markdown export button press."""
+        self.action_export_markdown()
+
     def action_browse_path(self) -> None:
         """Browse for a codebase path."""
         def on_path_selected(path: str) -> None:
@@ -165,8 +201,9 @@ class ModernImpactScanTUI(App):
                 config_panel = overview.query_one(ConfigPanel)
                 config_panel.set_scan_path(path)
                 self.log_message(f"Selected: {Path(path).name}", "green")
-            except Exception:
-                pass
+            except Exception as e:
+                logging.error(f"Failed to set scan path to '{path}': {e}")
+                self.log_message(f"Error: Failed to set path", "red")
 
         self.push_screen(PathBrowserModal(), on_path_selected)
 
@@ -235,10 +272,57 @@ class ModernImpactScanTUI(App):
 
             # Run scan (this is synchronous but @work makes it non-blocking)
             self.log_message("Running static analysis...", "cyan")
+
+            # Log enabled features
+            if config.enable_stackoverflow_scraper:
+                self.log_message("Stack Overflow scraping: Enabled", "cyan")
+            if config.enable_ai_fixes:
+                self.log_message("AI fixes: Enabled", "cyan")
+
             results = entrypoint.run_scan(config)
 
+            # Enrich findings with AI fixes and additional intelligence
+            if results.findings:
+                self.log_message(f"Found {len(results.findings)} issues", "green")
+
+                # Stack Overflow solutions (already done in run_scan if enabled)
+                if config.enable_stackoverflow_scraper:
+                    so_count = sum(1 for f in results.findings if f.stackoverflow_fixes)
+                    if so_count > 0:
+                        self.log_message(f"✓ Found {so_count} Stack Overflow solutions", "green")
+                    else:
+                        self.log_message("⚠ No Stack Overflow solutions (likely rate limited)", "yellow")
+                        self.log_message("Try: Use AI provider for automated fixes instead", "cyan")
+
+                # AI fix generation (async enrichment)
+                if config.enable_ai_fixes and config.ai_provider:
+                    # Count SO-guided vs pure AI fixes
+                    so_guided_count = sum(1 for f in results.findings if f.stackoverflow_fixes)
+
+                    if so_guided_count > 0:
+                        self.log_message(f"Generating AI fixes ({so_guided_count} guided by Stack Overflow)...", "yellow")
+                    else:
+                        self.log_message("Generating AI fixes...", "yellow")
+
+                    try:
+                        await entrypoint.enrich_findings_async(results.findings, config)
+                        ai_fix_count = sum(1 for f in results.findings if f.ai_fix)
+                        if ai_fix_count > 0:
+                            if so_guided_count > 0:
+                                self.log_message(f"✓ Generated {ai_fix_count} AI fixes ({so_guided_count} based on Stack Overflow)", "green")
+                            else:
+                                self.log_message(f"✓ Generated {ai_fix_count} AI fixes", "green")
+                    except Exception as e:
+                        self.log_message(f"AI fix generation failed: {str(e)[:80]}", "red")
+                        logging.exception("AI fix generation error")
+
+                self.log_message(f"Scan complete! Total findings: {len(results.findings)}", "green")
+            else:
+                self.log_message("Scan complete but no findings detected", "yellow")
+                self.log_message(f"Scanned files: {results.scanned_files}", "yellow")
+                self.log_message(f"Scan duration: {results.scan_duration:.2f}s", "yellow")
+
             self.current_results = results
-            self.log_message(f"Scan complete! Found {len(results.findings)} findings", "green")
 
             # Update findings table
             findings_table = self.query_one(RichFindingsTable)
@@ -254,9 +338,51 @@ class ModernImpactScanTUI(App):
         except Exception as e:
             self.log_message(f"Scan failed: {str(e)}", "red")
             logging.exception("Scan error")
+            import traceback
+            tb = traceback.format_exc()
+            # Log first 500 chars of traceback
+            for line in tb.split('\n')[:10]:
+                if line.strip():
+                    self.log_message(line[:100], "red")
 
         finally:
             self.scan_running = False
+
+    def action_export_html(self) -> None:
+        """Export HTML report."""
+        try:
+            reports_panel = self.query_one(ReportsPanel)
+            output_file = reports_panel.export_html()
+
+            if output_file:
+                self.log_message(f"HTML report saved: {output_file.name}", "green")
+        except Exception as e:
+            self.log_message(f"HTML export failed: {e}", "red")
+            logging.exception("HTML export error")
+
+    def action_export_sarif(self) -> None:
+        """Export SARIF report."""
+        try:
+            reports_panel = self.query_one(ReportsPanel)
+            output_file = reports_panel.export_sarif()
+
+            if output_file:
+                self.log_message(f"SARIF report saved: {output_file.name}", "green")
+        except Exception as e:
+            self.log_message(f"SARIF export failed: {e}", "red")
+            logging.exception("SARIF export error")
+
+    def action_export_markdown(self) -> None:
+        """Export Markdown report."""
+        try:
+            reports_panel = self.query_one(ReportsPanel)
+            output_file = reports_panel.export_markdown()
+
+            if output_file:
+                self.log_message(f"Markdown report saved: {output_file.name}", "green")
+        except Exception as e:
+            self.log_message(f"Markdown export failed: {e}", "red")
+            logging.exception("Markdown export error")
 
 
 def run_modern_tui():

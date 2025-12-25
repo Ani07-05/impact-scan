@@ -238,18 +238,19 @@ class APIKeys(BaseModel):
             return os.getenv(env_var)
 
         # Auto-detect from keyring/environment if not explicitly provided
+        # IMPORTANT: Use same key names as TUI config manager (without _api_key suffix)
         if "openai" not in data and not data.get("openai"):
-            data["openai"] = get_api_key("openai_api_key", "OPENAI_API_KEY")
+            data["openai"] = get_api_key("openai", "OPENAI_API_KEY")
         if "anthropic" not in data and not data.get("anthropic"):
-            data["anthropic"] = get_api_key("anthropic_api_key", "ANTHROPIC_API_KEY")
+            data["anthropic"] = get_api_key("anthropic", "ANTHROPIC_API_KEY")
         if "gemini" not in data and not data.get("gemini"):
-            data["gemini"] = get_api_key("gemini_api_key", "GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            data["gemini"] = get_api_key("gemini", "GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if "groq" not in data and not data.get("groq"):
-            data["groq"] = get_api_key("groq_api_key", "GROQ_API_KEY")
+            data["groq"] = get_api_key("groq", "GROQ_API_KEY")
         if "stackoverflow" not in data and not data.get("stackoverflow"):
-            data["stackoverflow"] = get_api_key("stackoverflow_api_key", "STACKOVERFLOW_API_KEY")
+            data["stackoverflow"] = get_api_key("stackoverflow", "STACKOVERFLOW_API_KEY")
         if "parsebot" not in data and not data.get("parsebot"):
-            data["parsebot"] = get_api_key("parsebot_api_key", "PARSEBOT_API_KEY")
+            data["parsebot"] = get_api_key("parsebot", "PARSEBOT_API_KEY")
 
         super().__init__(**data)
 
@@ -371,9 +372,6 @@ class ScanConfig(BaseModel):
         # Check path exists
         if not v.exists():
             raise ValueError(f"Target path does not exist: {v}")
-
-        if not v.exists():
-            raise ValueError(f"Target path must exist: {v}")
 
         # Check for reasonable path length
         if len(str(v)) > 1000:

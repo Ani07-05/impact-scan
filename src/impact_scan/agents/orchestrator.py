@@ -253,6 +253,7 @@ class AgentOrchestrator:
                 from .base import AgentStatus
 
                 results[agent_name] = AgentResult(
+                    agent_id=f"orchestrator-{agent_name}",
                     agent_name=agent_name,
                     status=AgentStatus.FAILED,
                     error_message=str(result),
@@ -369,46 +370,6 @@ class AgentOrchestrator:
                                 result_data = previous_results[dep_agent].data
                                 if required_data in result_data:
                                     context[required_data] = result_data[required_data]
-
-        return context
-
-    def get_orchestration_summary(self) -> Dict[str, Any]:
-        """Get summary of orchestration performance"""
-        failed_agents = [
-            name
-            for name, result in self.results.items()
-            if result.status == AgentStatus.FAILED
-        ]
-
-        successful_agents = [
-            name
-            for name, result in self.results.items()
-            if result.status == AgentStatus.SUCCESS
-        ]
-
-        avg_time = (
-            sum(r.execution_time for r in self.results.values()) / len(self.results)
-            if self.results
-            else 0
-        )
-
-        return {
-            "total_agents": len(self.results),
-            "successful_agents": len(successful_agents),
-            "failed_agents": failed_agents,
-            "total_execution_time": self.total_execution_time,
-            "average_agent_time": avg_time,
-            "agent_performance": self.agent_performance,
-        }
-        for dep in self.current_plan.dependencies if self.current_plan else []:
-            if dep.agent_name == agent_name:
-                for required_data in dep.requires_data:
-                    # Extract required data from dependency results
-                    for dep_agent in dep.depends_on:
-                        if dep_agent in previous_results:
-                            result = previous_results[dep_agent]
-                            if required_data in result.data:
-                                context[required_data] = result.data[required_data]
 
         return context
 

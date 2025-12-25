@@ -47,7 +47,7 @@ class VulnAgent(MultiModelAgent):
         print(f"[VULN] Starting vulnerability detection for {target_path}")
 
         # Phase 1: Static Analysis Scanning
-        findings = await self._run_static_analysis(target_path, context)
+        findings = context.get("static_findings", [])
 
         # Phase 2: Filter by minimum severity threshold
         if self.config.min_severity:
@@ -87,26 +87,6 @@ class VulnAgent(MultiModelAgent):
             f"MEDIUM: {result.data['by_severity'].get('MEDIUM', 0)}, "
             f"LOW: {result.data['by_severity'].get('LOW', 0)})"
         )
-
-    async def _run_static_analysis(
-        self, target_path: Path, context: Dict[str, Any]
-    ) -> List[Finding]:
-        """Run static analysis scan using Semgrep/Bandit"""
-        print("[VULN] Running static analysis scan...")
-
-        # Create scan config from agent config
-        scan_config = ScanConfig(
-            root_path=target_path,
-            min_severity=self.config.min_severity,
-            enable_ai_fixes=False,  # We handle AI separately
-            ai_provider=self.config.ai_provider,
-        )
-
-        # Run synchronous scan in executor to avoid blocking
-        loop = asyncio.get_event_loop()
-        findings = await loop.run_in_executor(None, static_scan.run_scan, scan_config)
-
-        return findings
 
     def _filter_by_severity(
         self, findings: List[Finding], min_severity: Severity

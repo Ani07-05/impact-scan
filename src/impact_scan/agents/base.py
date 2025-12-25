@@ -5,6 +5,7 @@ Enhanced with mandatory web search citations for all security findings.
 
 import asyncio
 import logging
+import shutil
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -15,6 +16,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from ..utils.schema import Finding, ScanConfig
+
+logger = logging.getLogger(__name__)
 
 
 class AgentStatus(Enum):
@@ -31,9 +34,9 @@ class AgentStatus(Enum):
 class AgentResult:
     """Result from agent execution with mandatory web search citations"""
 
-    agent_id: str
-    agent_name: str
-    status: AgentStatus
+    agent_id: str = "unknown"
+    agent_name: str = "unknown"
+    status: AgentStatus = AgentStatus.IDLE
     data: Dict[str, Any] = field(default_factory=dict)
     findings: List[Finding] = field(default_factory=list)
     citations_count: int = 0
@@ -103,7 +106,7 @@ class Agent(ABC):
             try:
                 callback(result)
             except Exception as e:
-                print(f"Callback error: {e}")
+                logger.error(f"Callback error: {e}")
 
     async def execute(
         self, target: Union[str, Path], context: Dict[str, Any] = None
@@ -178,65 +181,15 @@ class Agent(ABC):
 
     async def _is_tool_available(self, tool: str) -> bool:
         """Check if a specific tool is available"""
-        # Basic implementation - can be overridden
-        import shutil
-
         return shutil.which(tool) is not None
 
     async def _enhance_with_web_search(self, result: AgentResult) -> None:
         """
         Enhance findings with mandatory web search citations.
-        This ensures every finding has authoritative sources.
+        Web search module is currently deprecated/experimental.
         """
-        # Web search module is deprecated/experimental - skip enhancement
-        print(f"[{self.name}] Web search enhancement skipped (module not available)")
+        logger.debug(f"[{self.name}] Web search enhancement skipped (module not available)")
         return
-
-        try:
-            from ..core.web_search import enhance_findings_with_web_search
-
-            print(
-                f"[{self.name}] Enhancing {len(result.findings)} findings with web search citations..."
-            )
-
-            # Convert Finding objects to dict format expected by web_search
-            findings_data = []
-            for finding in result.findings:
-                finding_dict = {
-                    "vuln_id": finding.vuln_id,
-                    "rule_id": finding.rule_id,
-                    "title": finding.title,
-                    "description": finding.description,
-                    "severity": finding.severity.value
-                    if hasattr(finding.severity, "value")
-                    else finding.severity,
-                    "citations": finding.citations or [],
-                    "web_fix": finding.web_fix,
-                }
-                findings_data.append(finding_dict)
-
-            # Enhance with web search
-            enhanced_findings = await asyncio.to_thread(
-                enhance_findings_with_web_search, findings_data, self.config
-            )
-
-            # Update original Finding objects with enhanced data
-            for i, enhanced in enumerate(enhanced_findings):
-                if i < len(result.findings):
-                    finding = result.findings[i]
-                    if enhanced.get("citations"):
-                        finding.citations = enhanced["citations"]
-                        result.citations_count += len(enhanced["citations"])
-                    if enhanced.get("web_fix") and not finding.web_fix:
-                        finding.web_fix = enhanced["web_fix"]
-
-            print(
-                f"[{self.name}] Enhanced with {result.citations_count} total citations"
-            )
-
-        except Exception as e:
-            logging.error(f"[{self.name}] Web search enhancement failed: {e}")
-            # Don't fail the entire agent execution due to web search issues
 
     def get_capabilities(self) -> Dict[str, Any]:
         """Return agent capabilities and metadata"""
@@ -312,7 +265,7 @@ class MultiModelAgent(Agent):
                 return result
 
             except Exception as e:
-                print(f"Model {model} failed: {e}")
+                logger.warning(f"Model {model} failed: {e}")
                 continue
 
         raise RuntimeError("All AI models failed")

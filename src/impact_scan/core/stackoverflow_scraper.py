@@ -23,7 +23,7 @@ from playwright.async_api import Browser, async_playwright
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from rich.console import Console
 
-from ..utils.schema import Finding
+from ..utils.schema import Finding, StackOverflowFix, CodeBlock as SchemaCodeBlock
 
 console = Console()
 
@@ -1130,3 +1130,72 @@ def scrape_stackoverflow_sync(
     """Synchronous wrapper for Stack Overflow scraping."""
     scraper = StackOverflowScraper(scrape_delay=scrape_delay, max_answers=max_answers)
     return asyncio.run(scraper.search_and_scrape(finding))
+
+
+def search_and_scrape_solutions(
+    finding: Finding, max_results: int = 3
+) -> List[StackOverflowFix]:
+    """
+    Search and scrape Stack Overflow for solutions to a vulnerability.
+
+    This is the main entry point used by entrypoint.py to enrich findings
+    with Stack Overflow solutions.
+
+    Args:
+        finding: The vulnerability finding to search for
+        max_results: Maximum number of answers to return (default: 3)
+
+    Returns:
+        List of StackOverflowFix objects
+    """
+    try:
+        # Use hybrid scraper for best results (Parse.bot + Playwright fallback)
+        scraper = HybridStackOverflowScraper(
+            max_answers=max_results,
+            method="auto",  # Auto-select best method
+            scrape_delay=4.0
+        )
+
+        # Run async scraper
+        answers = asyncio.run(scraper.search_and_scrape(finding))
+
+        if not answers:
+            return []
+
+        # Convert StackOverflowAnswer objects to StackOverflowFix model objects
+        fixes = []
+        for answer in answers:
+            # Convert CodeBlock objects to schema CodeBlock objects
+            code_blocks = [
+                SchemaCodeBlock(language=cb.language, code=cb.code)
+                for cb in answer.code_snippets
+            ]
+
+            fix = StackOverflowFix(
+                url=answer.url,
+                title=answer.title,
+                question_id=answer.question_id,
+                answer_id=answer.answer_id,
+                votes=answer.votes,
+                accepted=answer.accepted,
+                author=answer.author,
+                author_reputation=answer.author_reputation,
+                post_date=answer.post_date,
+                code_snippets=code_blocks,
+                explanation=answer.explanation,
+                comments=answer.comments,
+                score=answer.score,
+                gemini_analysis=None  # Can be added later by AI validator
+            )
+            fixes.append(fix)
+
+        console.log(
+            f"[bold green]Successfully found {len(fixes)} Stack Overflow solutions[/bold green]"
+        )
+        return fixes
+
+    except Exception as e:
+        console.log(f"[red]Error in search_and_scrape_solutions: {e}[/red]")
+        import traceback
+        traceback.print_exc()
+        return []
