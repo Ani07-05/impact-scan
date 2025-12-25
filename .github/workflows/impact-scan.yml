@@ -53,12 +53,14 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          impact-scan scan . \
+          impact-scan scan src \
             --profile ${{ github.event.inputs.scan_profile || 'standard' }} \
             --output-format sarif,markdown,html \
             --output impact-scan-results \
             --min-severity medium \
-            --ai groq
+            --ai groq \
+            --ai-validation \
+            --ai-validation-provider groq
       
       - name: Upload SARIF to GitHub Security
         if: always()
