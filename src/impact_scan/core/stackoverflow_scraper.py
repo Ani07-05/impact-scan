@@ -1133,7 +1133,7 @@ def scrape_stackoverflow_sync(
 
 
 def search_and_scrape_solutions(
-    finding: Finding, max_results: int = 3
+    finding: Finding, max_results: int = 3, scrape_delay: float = 4.0
 ) -> List[StackOverflowFix]:
     """
     Search and scrape Stack Overflow for solutions to a vulnerability.
@@ -1144,6 +1144,7 @@ def search_and_scrape_solutions(
     Args:
         finding: The vulnerability finding to search for
         max_results: Maximum number of answers to return (default: 3)
+        scrape_delay: Delay between requests in seconds (default: 4.0)
 
     Returns:
         List of StackOverflowFix objects
@@ -1152,8 +1153,8 @@ def search_and_scrape_solutions(
         # Use hybrid scraper for best results (Parse.bot + Playwright fallback)
         scraper = HybridStackOverflowScraper(
             max_answers=max_results,
+            scrape_delay=scrape_delay,
             method="auto",  # Auto-select best method
-            scrape_delay=4.0
         )
 
         # Run async scraper
