@@ -192,3 +192,7 @@ IMPLEMENTATION_OVERVIEW.txt
 IMPLEMENTATION_SUMMARY.txt
 COMMANDS.txt
 QUICK_START.txt
+binaries/
+dist/
+build/
+*.spec
