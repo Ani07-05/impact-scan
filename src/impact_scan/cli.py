@@ -269,11 +269,6 @@ def scan_command(
         "--enable-ai-fixes",
         help="Enable AI-powered fix generation",
     ),
-    enable_stackoverflow: bool = typer.Option(
-        False,
-        "--enable-stackoverflow",
-        help="Enable Stack Overflow citation search",
-    ),
     fix: bool = typer.Option(
         False,
         "--fix",
@@ -596,11 +591,19 @@ def scan_command(
             )
             scan_result.findings = kept_findings
 
+            # If show_ignored is enabled, add ignored findings back to results
+            # but keep them marked as ignored in metadata
+            if show_ignored and ignored_findings:
+                console.print(
+                    f"[cyan]Including {len(ignored_findings)} ignored finding(s) in output (--show-ignored)[/cyan]"
+                )
+                scan_result.findings = kept_findings + ignored_findings
+
             if ignored_findings:
                 console.print(
                     f"[yellow]Ignored {len(ignored_findings)} finding(s) based on ignore rules[/yellow]"
                 )
-                if verbose:
+                if verbose or show_ignored:
                     for f in ignored_findings[:5]:  # Show first 5
                         reason = f.metadata.get("ignore_reason", "Unknown")
                         console.print(
