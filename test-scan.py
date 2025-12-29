@@ -1,4 +1,4 @@
-"""Test file for Impact Scan GitHub App - Python API with security issues"""
+"""Test file for Impact Scan GitHub App - Python Flask API with security vulnerabilities"""
 
 import os
 import sqlite3
