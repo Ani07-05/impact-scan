@@ -181,14 +181,16 @@ Scanned **{file_count} files** in **{scan_duration_s:.1f}s**
         comment_parts.append(f"({critical_count} critical, {high_count} high, {medium_count} medium)")
         comment_parts.append("")
 
-        # Show first 10 findings in detail
-        for idx, finding in enumerate(bugs_security[:10]):
+        # Show all findings (up to GitHub comment size limit)
+        # For now, show up to 50 findings to avoid hitting comment size limits
+        max_findings_to_show = min(len(bugs_security), 50)
+        for idx, finding in enumerate(bugs_security[:max_findings_to_show]):
             comment_parts.append(self._format_finding(finding, idx + 1))
 
         # Remaining findings
-        remaining = len(bugs_security) - 10
+        remaining = len(bugs_security) - max_findings_to_show
         if remaining > 0:
-            comment_parts.append(f"\n*{remaining} more issues - see inline comments below*\n")
+            comment_parts.append(f"\n*{remaining} more issues not shown (comment size limit)*\n")
 
         # Pro tier upsell for free users
         if self.tier == "free":
