@@ -1,56 +1,49 @@
 version: '3.8'
 
 services:
-  # Impact-Scan CLI - for scanning projects
-  scan:
-    build: .
-    image: impact-scan:latest
-    container_name: impact-scan
-    volumes:
-      - .:/workspace:ro  # Mount current directory as read-only
-      - ./reports:/reports  # Output directory for reports
-    environment:
-      # AI Provider API Keys (optional - set in .env file)
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-      - GROQ_API_KEY=${GROQ_API_KEY:-}
-    command: scan /workspace --output /reports/scan-report.html
-    user: "1000:1000"  # Run as non-root user
-
-  # Impact-Scan Web UI - for browser-based interface
-  web:
-    build: .
-    image: impact-scan:latest
-    container_name: impact-scan-web
+  redis:
+    image: redis:7-alpine
     ports:
-      - "5000:5000"
+      - "6379:6379"
     volumes:
-      - .:/workspace
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-      - GROQ_API_KEY=${GROQ_API_KEY:-}
-    command: web --port 5000 --no-browser
-    user: "1000:1000"
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
-  # Impact-Scan Doctor - health check
-  doctor:
-    build: .
-    image: impact-scan:latest
-    container_name: impact-scan-doctor
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-      - GROQ_API_KEY=${GROQ_API_KEY:-}
-    command: doctor
-    user: "1000:1000"
+  webhook:
+    build:
+      context: .
+      dockerfile: Dockerfile.webhook
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - repo_cache:/app/repos
+    command: uvicorn impact_scan.github_app.webhook_handler:app --host 0.0.0.0 --port 8000 --reload
 
-# Usage:
-# docker-compose run scan                              # Scan current directory
-# docker-compose run scan scan /workspace --profile comprehensive
-# docker-compose up web                                 # Launch web UI at http://localhost:5000
-# docker-compose run doctor                            # Check installation health
-# docker-compose run scan scan /workspace --ai gemini  # Scan with AI fixes
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.webhook
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - repo_cache:/app/repos
+    command: python -m impact_scan.github_app.scanner_worker
+
+volumes:
+  redis_data:
+  repo_cache:
