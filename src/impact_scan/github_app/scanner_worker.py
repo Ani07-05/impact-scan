@@ -33,6 +33,7 @@ if ripgrep_path.exists():
 from .queue_manager import QueueManager
 from .github_client import GitHubClient
 from .comment_formatter import CommentFormatter
+from ..utils.schema import Severity
 
 # Configure logging
 logging.basicConfig(
@@ -549,7 +550,7 @@ class ScannerWorker:
             logger.error(f"Job {job_id} failed: {e}", exc_info=True)
 
             # Mark job as failed
-            self.queue_manager.update_job_status(job_id, "failed", error=str(e))
+            self.queue_manager.update_job_status(job_id, "failed", result={"error": str(e)})
 
             # Post error comment
             try:
