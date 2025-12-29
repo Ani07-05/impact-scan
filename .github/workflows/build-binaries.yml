@@ -27,6 +27,14 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install ripgrep
+        run: |
+          choco install ripgrep -y
+
+      - name: Verify ripgrep
+        run: |
+          rg --version
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -35,7 +43,14 @@ jobs:
 
       - name: Build Windows executable
         run: |
-          pyinstaller --name=impact-scan --onefile --console src/impact_scan/cli.py
+          python build_exe.py
+
+      - name: Create distribution package
+        run: |
+          mkdir impact-scan-windows
+          copy dist\impact-scan.exe impact-scan-windows\
+          copy dist\README.txt impact-scan-windows\
+          echo "Note: ripgrep must be installed separately. See README.txt" > impact-scan-windows\INSTALL.txt
 
       - name: Test executable
         run: |
@@ -45,14 +60,19 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: impact-scan-windows
-          path: dist/impact-scan.exe
+          path: impact-scan-windows/
           retention-days: 90
+
+      - name: Create release archive
+        if: github.event_name == 'release'
+        run: |
+          powershell Compress-Archive -Path impact-scan-windows\* -DestinationPath impact-scan-windows.zip
 
       - name: Upload to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/impact-scan.exe
+          files: impact-scan-windows.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -69,6 +89,15 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install ripgrep
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+
+      - name: Verify ripgrep
+        run: |
+          rg --version
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -77,7 +106,15 @@ jobs:
 
       - name: Build Linux executable
         run: |
-          pyinstaller --name=impact-scan --onefile --console src/impact_scan/cli.py
+          python build_exe.py
+
+      - name: Create distribution package
+        run: |
+          mkdir impact-scan-linux
+          cp dist/impact-scan impact-scan-linux/
+          cp dist/README.txt impact-scan-linux/
+          echo "Note: ripgrep must be installed separately. See README.txt" > impact-scan-linux/INSTALL.txt
+          chmod +x impact-scan-linux/impact-scan
 
       - name: Test executable
         run: |
@@ -87,14 +124,19 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: impact-scan-linux
-          path: dist/impact-scan
+          path: impact-scan-linux/
           retention-days: 90
+
+      - name: Create release archive
+        if: github.event_name == 'release'
+        run: |
+          tar -czf impact-scan-linux.tar.gz impact-scan-linux/
 
       - name: Upload to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/impact-scan
+          files: impact-scan-linux.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -111,6 +153,14 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install ripgrep
+        run: |
+          brew install ripgrep
+
+      - name: Verify ripgrep
+        run: |
+          rg --version
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -119,7 +169,15 @@ jobs:
 
       - name: Build macOS executable
         run: |
-          pyinstaller --name=impact-scan --onefile --console src/impact_scan/cli.py
+          python build_exe.py
+
+      - name: Create distribution package
+        run: |
+          mkdir impact-scan-macos
+          cp dist/impact-scan impact-scan-macos/
+          cp dist/README.txt impact-scan-macos/
+          echo "Note: ripgrep must be installed separately. See README.txt" > impact-scan-macos/INSTALL.txt
+          chmod +x impact-scan-macos/impact-scan
 
       - name: Test executable
         run: |
@@ -129,13 +187,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: impact-scan-macos
-          path: dist/impact-scan
+          path: impact-scan-macos/
           retention-days: 90
+
+      - name: Create release archive
+        if: github.event_name == 'release'
+        run: |
+          tar -czf impact-scan-macos.tar.gz impact-scan-macos/
 
       - name: Upload to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/impact-scan
+          files: impact-scan-macos.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

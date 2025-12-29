@@ -45,7 +45,6 @@ dependencies = [
     "rich>=13.0.0",
     "textual>=0.41.0",
     "typer>=0.12.0",
-    "bandit>=1.7.0",
     "requests>=2.28.0",
     "beautifulsoup4>=4.11.0",
     "httpx>=0.25.0",
@@ -57,8 +56,6 @@ dependencies = [
     "pyyaml>=6.0.0",
     "markdown>=3.5.0",
     "tomli>=2.0.0;python_version<'3.11'",
-    "semgrep>=1.134.0,<2.0.0",
-    "safety>=3.6.1,<4.0.0",
     "reportlab>=4.4.3,<5.0.0",
     "flask>=3.1.2,<4.0.0",
     "pytermgui>=7.7.4,<8.0.0",
@@ -147,7 +144,6 @@ sarif-om = ">=1.0.4"
 rich = ">=13.0.0"
 textual = ">=0.41.0"
 typer = ">=0.12.0"
-bandit = ">=1.7.0"
 requests = ">=2.28.0"
 beautifulsoup4 = ">=4.11.0"
 httpx = ">=0.25.0"
@@ -159,8 +155,6 @@ pygments = ">=2.15.0"
 pyyaml = ">=6.0.0"
 markdown = ">=3.5.0"
 tomli = {version = ">=2.0.0", python = "<3.11"}
-semgrep = ">=1.134.0,<2.0.0"
-safety = ">=3.6.1,<4.0.0"
 reportlab = ">=4.4.3,<5.0.0"
 flask = ">=3.1.2,<4.0.0"
 pytermgui = ">=7.7.4,<8.0.0"

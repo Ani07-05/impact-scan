@@ -17,8 +17,15 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from bs4 import BeautifulSoup
-from playwright.async_api import Browser, async_playwright
 from rich.console import Console
+
+try:
+    from playwright.async_api import Browser, async_playwright
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+    Browser = None
+    async_playwright = None
 
 from ..utils.schema import Finding, ScanConfig, Severity
 

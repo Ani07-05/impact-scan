@@ -6,6 +6,7 @@ Enhanced with mandatory web search citations for all security findings.
 import asyncio
 import logging
 import shutil
+import sys
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -175,12 +176,58 @@ class Agent(ABC):
 
     async def _check_dependencies(self):
         """Check if required tools/dependencies are available"""
+        logger.info(f"Checking dependencies for agent, tools: {self.tools}")
         for tool in self.tools:
-            if not await self._is_tool_available(tool):
+            available = await self._is_tool_available(tool)
+            logger.info(f"Tool '{tool}' available: {available}")
+            if not available:
                 raise RuntimeError(f"Required tool '{tool}' not available")
 
     async def _is_tool_available(self, tool: str) -> bool:
         """Check if a specific tool is available"""
+        import sys as _sys
+        _sys.stderr.write(f"[DEBUG] _is_tool_available called for tool: {tool}\n")
+        _sys.stderr.flush()
+
+        # Special case for ripgrep - check for bundled version
+        if tool == "ripgrep" or tool == "rg":
+            frozen = getattr(sys, 'frozen', False)
+            has_meipass = hasattr(sys, '_MEIPASS')
+            _sys.stderr.write(f"[DEBUG] sys.frozen={frozen}, has _MEIPASS={has_meipass}\n")
+            _sys.stderr.flush()
+
+            # Check for bundled ripgrep directly (avoid import issues)
+            if frozen and has_meipass:
+                # Running as PyInstaller bundle
+                bundle_dir = Path(sys._MEIPASS)
+                rg_name = 'rg.exe' if sys.platform == 'win32' else 'rg'
+                bundled_rg = bundle_dir / 'impact_scan_tools' / rg_name
+
+                logger.info(f"Agent checking for bundled ripgrep at: {bundled_rg}")
+                exists = bundled_rg.exists()
+                logger.info(f"Bundled ripgrep exists: {exists}")
+
+                if exists:
+                    logger.info(f"Agent found bundled ripgrep: {bundled_rg}")
+                    return True
+                else:
+                    logger.warning(f"Bundled ripgrep not found at expected location: {bundled_rg}")
+                    # Try alternative location
+                    bundled_rg_alt = bundle_dir / rg_name
+                    if bundled_rg_alt.exists():
+                        logger.info(f"Agent found bundled ripgrep at alt location: {bundled_rg_alt}")
+                        return True
+            else:
+                logger.info("Not running as frozen executable, skipping bundled ripgrep check")
+
+            # Fall back to system ripgrep
+            logger.info("Checking system ripgrep with shutil.which")
+            has_rg = shutil.which("rg") is not None
+            logger.info(f"shutil.which('rg') returned: {has_rg}")
+            if not has_rg:
+                logger.error("Ripgrep not found - neither bundled nor in system PATH")
+            return has_rg
+
         return shutil.which(tool) is not None
 
     async def _enhance_with_web_search(self, result: AgentResult) -> None:

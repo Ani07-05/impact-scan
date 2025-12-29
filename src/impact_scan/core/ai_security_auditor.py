@@ -27,7 +27,7 @@ class AISecurityAuditor:
     """
     Discovers security vulnerabilities using deep AI code analysis.
 
-    Complements Semgrep by finding:
+    Complements static analysis by finding:
     - Configuration vulnerabilities (missing security flags)
     - Logic vulnerabilities (session fixation, race conditions)
     - Framework-specific issues (CORS misconfig, middleware order)
@@ -38,7 +38,7 @@ class AISecurityAuditor:
 
     _GENERAL_AUDIT_PROMPT = """<role>You are a senior security engineer with 15+ years of experience in application security, specializing in finding logic vulnerabilities and configuration issues that automated tools miss.</role>
 
-<task>Perform a deep security audit of the following code to identify vulnerabilities that static analysis tools (like Semgrep) cannot detect.</task>
+<task>Perform a deep security audit of the following code to identify vulnerabilities that pattern-based scanners cannot detect.</task>
 
 <context>
 File: {file_path}

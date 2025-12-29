@@ -1,11 +1,9 @@
 """
 Automatic dependency installer for Impact-Scan.
-Ensures seamless out-of-box experience like Claude Code.
+Ensures seamless out-of-box experience.
 
 Handles:
-- Semgrep auto-installation
-- pip-audit auto-installation
-- Safety auto-installation
+- Ripgrep availability check
 - Playwright browser setup
 """
 
@@ -48,216 +46,78 @@ class DependencyInstaller:
         Check if a tool is installed and accessible.
 
         Args:
-            tool_name: Name of the tool (e.g., 'semgrep', 'pip-audit')
+            tool_name: Name of the tool (e.g., 'rg', 'ripgrep')
 
         Returns:
             True if tool is available, False otherwise
         """
         return shutil.which(tool_name) is not None
 
-    def install_package(
-        self, package_name: str, display_name: Optional[str] = None
-    ) -> Tuple[bool, str]:
+    def ensure_ripgrep(self) -> Tuple[bool, str]:
         """
-        Install a Python package using pip.
-
-        Args:
-            package_name: PyPI package name
-            display_name: Human-readable name for display
-
-        Returns:
-            Tuple of (success: bool, message: str)
-        """
-        display = display_name or package_name
-
-        try:
-            self._print(f"\n📦 Installing {display}...", "yellow")
-
-            # Use --user flag for non-virtual environments
-            in_venv = hasattr(sys, "real_prefix") or (
-                hasattr(sys, "base_prefix") and sys.base_prefix != sys.prefix
-            )
-
-            cmd = [sys.executable, "-m", "pip", "install", package_name]
-            if not in_venv:
-                cmd.append("--user")
-
-            # Show progress with spinner
-            if not self.silent:
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    transient=True,
-                ) as progress:
-                    task = progress.add_task(f"Installing {display}...", total=None)
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=300,  # 5 minutes timeout
-                    )
-                    progress.update(task, completed=True)
-            else:
-                result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=300
-                )
-
-            if result.returncode == 0:
-                self._print(f"✓ {display} installed successfully!", "green")
-                logger.info(f"{package_name} installed successfully")
-                return True, f"{display} installed successfully"
-            else:
-                error_msg = result.stderr.strip() or result.stdout.strip()
-                self._print(f"✗ Failed to install {display}", "red")
-                logger.error(f"Failed to install {package_name}: {error_msg}")
-                return False, f"Installation failed: {error_msg[:200]}"
-
-        except subprocess.TimeoutExpired:
-            self._print("✗ Installation timed out after 5 minutes", "red")
-            return False, "Installation timed out"
-        except Exception as e:
-            self._print(f"✗ Installation error: {e}", "red")
-            logger.exception(f"Error installing {package_name}")
-            return False, f"Installation error: {str(e)}"
-
-    def ensure_semgrep(self, auto_install: bool = True) -> Tuple[bool, str]:
-        """
-        Ensure Semgrep is installed.
-
-        Args:
-            auto_install: If True, automatically install if missing
+        Ensure ripgrep is installed.
 
         Returns:
             Tuple of (available: bool, message: str)
         """
-        if self.check_tool("semgrep"):
+        # First check for bundled ripgrep (for executable distributions)
+        import sys
+        from pathlib import Path
+
+        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            # Running as PyInstaller bundle - check for bundled ripgrep
+            bundle_dir = Path(sys._MEIPASS)
+            rg_name = 'rg.exe' if sys.platform == 'win32' else 'rg'
+            bundled_rg = bundle_dir / 'impact_scan_tools' / rg_name
+
+            if bundled_rg.exists():
+                logger.info(f"Found bundled ripgrep at: {bundled_rg}")
+                return True, f"ripgrep (bundled) is available"
+
+        # Check system ripgrep
+        if self.check_tool("rg"):
             try:
                 result = subprocess.run(
-                    ["semgrep", "--version"], capture_output=True, text=True, timeout=5
+                    ["rg", "--version"], capture_output=True, text=True, timeout=5
                 )
                 version = (
                     result.stdout.strip().split("\n")[0]
                     if result.returncode == 0
                     else "unknown"
                 )
-                logger.info(f"Semgrep {version} found")
-                return True, f"Semgrep {version} is available"
+                logger.info(f"ripgrep {version} found")
+                return True, f"ripgrep {version} is available"
             except Exception as e:
-                logger.warning(f"Semgrep found but version check failed: {e}")
-                return True, "Semgrep is available (version unknown)"
+                logger.warning(f"ripgrep found but version check failed: {e}")
+                return True, "ripgrep is available (version unknown)"
 
-        # Not installed
-        if not auto_install:
-            return False, "Semgrep not installed"
+        # Not installed - provide installation instructions
+        self._print("\n[yellow][WARNING] ripgrep (rg) not found[/yellow]")
+        self._print("ripgrep is required for static code analysis")
+        self._print("\nInstallation instructions:")
+        self._print("  Windows:  choco install ripgrep  or  winget install BurntSushi.ripgrep.MSVC")
+        self._print("  macOS:    brew install ripgrep")
+        self._print("  Linux:    sudo apt install ripgrep  (Ubuntu/Debian)")
+        self._print("            sudo dnf install ripgrep  (Fedora/RHEL)")
+        self._print("\nOr download from: https://github.com/BurntSushi/ripgrep/releases")
 
-        # Auto-install
-        self._print("\n[yellow]⚠ Semgrep not found[/yellow]")
-        self._print("Semgrep is required for static code analysis")
+        return False, "ripgrep not installed"
 
-        if not self.silent:
-            try:
-                from rich.prompt import Confirm
-
-                if not Confirm.ask("Install Semgrep now?", default=True):
-                    return False, "User declined Semgrep installation"
-            except Exception:
-                # If prompting fails, proceed with installation
-                pass
-
-        success, message = self.install_package("semgrep", "Semgrep")
-
-        if success:
-            # Verify installation
-            if self.check_tool("semgrep"):
-                return True, "Semgrep installed and ready"
-            else:
-                return False, "Semgrep installed but not in PATH (restart terminal)"
-
-        return False, message
-
-    def ensure_pip_audit(self, auto_install: bool = True) -> Tuple[bool, str]:
-        """
-        Ensure pip-audit is installed (optional but recommended).
-
-        Args:
-            auto_install: If True, automatically install if missing
-
-        Returns:
-            Tuple of (available: bool, message: str)
-        """
-        if self.check_tool("pip-audit"):
-            logger.info("pip-audit found")
-            return True, "pip-audit is available"
-
-        if not auto_install:
-            return False, "pip-audit not installed (optional)"
-
-        # Auto-install (silent for optional dependency)
-        logger.info("Installing pip-audit (optional dependency)")
-        success, message = self.install_package("pip-audit", "pip-audit")
-
-        return success, message if success else "pip-audit not installed (optional)"
-
-    def ensure_safety(self, auto_install: bool = True) -> Tuple[bool, str]:
-        """
-        Ensure Safety is installed (optional fallback).
-
-        Args:
-            auto_install: If True, automatically install if missing
-
-        Returns:
-            Tuple of (available: bool, message: str)
-        """
-        try:
-            __import__("safety")
-            logger.info("Safety found")
-            return True, "Safety is available"
-        except ImportError:
-            pass
-
-        if not auto_install:
-            return False, "Safety not installed (optional)"
-
-        # Auto-install (silent for optional dependency)
-        logger.info("Installing Safety (optional dependency)")
-        success, message = self.install_package("safety", "Safety")
-
-        return success, message if success else "Safety not installed (optional)"
-
-    def ensure_all_tools(self, auto_install: bool = True) -> dict:
+    def ensure_all_tools(self) -> dict:
         """
         Ensure all security scanning tools are available.
-
-        Args:
-            auto_install: If True, automatically install missing tools
 
         Returns:
             Dict with tool availability status
         """
         results = {}
 
-        # Critical: Semgrep (required)
-        semgrep_ok, semgrep_msg = self.ensure_semgrep(auto_install)
-        results["semgrep"] = {
-            "available": semgrep_ok,
-            "message": semgrep_msg,
+        # Critical: ripgrep (required)
+        ripgrep_ok, ripgrep_msg = self.ensure_ripgrep()
+        results["ripgrep"] = {
+            "available": ripgrep_ok,
+            "message": ripgrep_msg,
             "required": True,
-        }
-
-        # Optional: pip-audit (recommended)
-        pip_audit_ok, pip_audit_msg = self.ensure_pip_audit(auto_install)
-        results["pip-audit"] = {
-            "available": pip_audit_ok,
-            "message": pip_audit_msg,
-            "required": False,
-        }
-
-        # Optional: Safety (fallback)
-        safety_ok, safety_msg = self.ensure_safety(auto_install)
-        results["safety"] = {
-            "available": safety_ok,
-            "message": safety_msg,
-            "required": False,
         }
 
         return results
@@ -319,19 +179,18 @@ def get_installer(silent: bool = False) -> DependencyInstaller:
     return _installer
 
 
-def ensure_scanning_tools(auto_install: bool = True, silent: bool = False) -> bool:
+def ensure_scanning_tools(silent: bool = False) -> bool:
     """
     Convenience function to ensure all scanning tools are available.
 
     Args:
-        auto_install: If True, automatically install missing tools
         silent: If True, suppress console output
 
     Returns:
         True if all required tools are available, False otherwise
     """
     installer = get_installer(silent=silent)
-    results = installer.ensure_all_tools(auto_install)
+    results = installer.ensure_all_tools()
 
     # Check if required tools are available
     required_ok = all(
@@ -344,7 +203,7 @@ def ensure_scanning_tools(auto_install: bool = True, silent: bool = False) -> bo
 if __name__ == "__main__":
     # Test auto-installer
     installer = DependencyInstaller(silent=False)
-    results = installer.ensure_all_tools(auto_install=True)
+    results = installer.ensure_all_tools()
 
     console.print("\n[bold cyan]Installation Results:[/bold cyan]")
     for tool, result in results.items():

@@ -19,9 +19,17 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from bs4 import BeautifulSoup
-from playwright.async_api import Browser, async_playwright
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from rich.console import Console
+
+try:
+    from playwright.async_api import Browser, async_playwright
+    from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+    Browser = None
+    async_playwright = None
+    PlaywrightTimeoutError = TimeoutError
 
 from ..utils.schema import Finding, StackOverflowFix, CodeBlock as SchemaCodeBlock
 from ..utils.rate_limiter import AdaptiveRateLimiter

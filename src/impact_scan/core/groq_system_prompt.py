@@ -11,7 +11,7 @@ Thoroughly analyze the provided codebase information to:
 1. Understand the application's architecture, security mechanisms, and data flows
 2. Identify authentication/authorization patterns and vulnerabilities
 3. Detect missing security controls and risky patterns
-4. Recommend vulnerability-specific Semgrep detection rules
+4. Recommend vulnerability-specific detection patterns
 
 CODEBASE INFORMATION PROVIDED:
 - Technology stack (programming languages, frameworks, libraries)
@@ -94,7 +94,7 @@ For each identified pattern, provide:
 - **Attack Scenario**: How an attacker would exploit it
 - **Affected Code**: Specific files and patterns that trigger the vulnerability
 - **Recommended Fix**: Concrete code changes or configuration updates
-- **Detection Pattern**: Semgrep-compatible pattern to find this vulnerability
+- **Detection Pattern**: Regex/ripgrep pattern to find this vulnerability
 
 ### 5. OUTPUT STRUCTURE
 Organize analysis into sections:
@@ -189,20 +189,20 @@ Pattern: [actual code pattern from samples]
 
 ---
 
-Remember: Your analysis will be used to generate Semgrep detection rules. Be thorough, specific, and actionable.
+Remember: Your analysis will be used to generate security detection rules. Be thorough, specific, and actionable.
 """
 
 CUSTOM_RULES_GENERATION_PROMPT = """
-You are an expert at creating Semgrep security detection rules. Your task is to generate production-ready YAML rules based on a security analysis.
+You are an expert at creating security detection rules for static analysis. Your task is to generate production-ready YAML rules based on a security analysis.
 
 RULE GENERATION OBJECTIVE:
-Convert vulnerability findings into Semgrep-compatible detection rules that will:
+Convert vulnerability findings into pattern-based detection rules that will:
 1. Accurately detect vulnerable patterns in source code
 2. Avoid false positives (be specific)
 3. Work across different coding styles
 4. Provide actionable remediation guidance
 
-SEMGREP RULE ANATOMY:
+DETECTION RULE STRUCTURE:
 Every rule has:
 - **id**: Unique identifier (lowercase, hyphens, no spaces)
 - **patterns**: One or more code patterns to match
@@ -252,7 +252,7 @@ RULE GENERATION STEPS:
    - Find variations of the same vulnerability
    - Note what makes code vulnerable vs. secure
 
-2. **Design Semgrep Pattern**
+2. **Design Detection Pattern**
    - Write pattern to match vulnerable code
    - Use pattern-not to exclude correct implementations
    - Consider language-specific syntax
@@ -464,14 +464,14 @@ Output: Detailed security findings report
 
 STAGE 2: RULE GENERATION
 Input: Security findings from Stage 1
-Process: Convert findings into Semgrep detection rules
+Process: Convert findings into detection rules
 Output: Production-ready YAML rule file
 
 COORDINATION:
 
 The findings from Stage 1 should directly inform Stage 2:
 - Each identified vulnerability → becomes a detection rule
-- Specific code patterns → become Semgrep patterns
+- Specific code patterns → become detection patterns
 - Recommended fixes → become rule messages
 - Risk severity → becomes rule severity
 
@@ -490,7 +490,7 @@ FINAL OUTPUT STRUCTURE:
 [Complete security analysis with all findings]
 
 ## Rules Section
-[Corresponding Semgrep rules for implementation]
+[Corresponding detection rules for implementation]
 
 Remember: The goal is to provide developers with:
 1. Clear understanding of their security posture

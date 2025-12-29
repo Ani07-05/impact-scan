@@ -105,9 +105,169 @@ class KnowledgeGraph:
         # Framework-specific knowledge
         self.framework_safe_functions = self._load_framework_knowledge()
 
-    def build(self):
-        """Build the knowledge graph by analyzing the codebase."""
+    def parse_impact_scan_context(self, context_file: Path) -> Dict[str, Any]:
+        """
+        Parse impact-scan.md to extract project metadata.
+
+        Args:
+            context_file: Path to impact-scan.md file
+
+        Returns:
+            Dict with project_type, frameworks, dependencies, entry_points, security_patterns
+        """
+        import re
+
+        if not context_file.exists():
+            logger.warning(f"Context file not found: {context_file}")
+            return {}
+
+        try:
+            content = context_file.read_text(encoding='utf-8')
+        except Exception as e:
+            logger.error(f"Failed to read context file: {e}")
+            return {}
+
+        metadata = {}
+
+        # Extract project type
+        project_type_match = re.search(r'\*\*Type\*\*:\s*(.+)', content)
+        if project_type_match:
+            metadata['project_type'] = project_type_match.group(1).strip()
+
+        # Extract frameworks
+        frameworks = []
+        frameworks_section = re.search(
+            r'## Detected Frameworks & Libraries\n(.+?)(?=\n##|\Z)',
+            content,
+            re.DOTALL
+        )
+        if frameworks_section:
+            framework_lines = frameworks_section.group(1).strip().split('\n')
+            frameworks = [
+                line.strip('- ').strip()
+                for line in framework_lines
+                if line.strip().startswith('-')
+            ]
+        metadata['frameworks'] = frameworks
+
+        # Extract dependencies
+        dependencies = []
+        deps_section = re.search(
+            r'## Dependencies\n(.+?)(?=\n##|\Z)',
+            content,
+            re.DOTALL
+        )
+        if deps_section:
+            dep_lines = deps_section.group(1).strip().split('\n')
+            dependencies = [
+                line.strip('- ').strip()
+                for line in dep_lines
+                if line.strip().startswith('-')
+            ]
+        metadata['dependencies'] = dependencies
+
+        # Extract entry points
+        entry_points = []
+        entry_section = re.search(
+            r'## Entry Points\n(.+?)(?=\n##|\Z)',
+            content,
+            re.DOTALL
+        )
+        if entry_section:
+            entry_lines = entry_section.group(1).strip().split('\n')
+            entry_points = [
+                line.strip('- ').strip()
+                for line in entry_lines
+                if line.strip().startswith('-')
+            ]
+        metadata['entry_points'] = entry_points
+
+        # Extract security patterns
+        security_patterns = []
+        security_section = re.search(
+            r'## Security-Relevant Patterns Detected\n(.+?)(?=\n##|\Z)',
+            content,
+            re.DOTALL
+        )
+        if security_section:
+            pattern_lines = security_section.group(1).strip().split('\n')
+            security_patterns = [
+                line.strip('- ').strip()
+                for line in pattern_lines
+                if line.strip().startswith('-')
+            ]
+        metadata['security_patterns'] = security_patterns
+
+        logger.info(
+            f"Parsed impact-scan.md: {metadata.get('project_type', 'Unknown')} "
+            f"with {len(frameworks)} frameworks, {len(dependencies)} dependencies"
+        )
+
+        return metadata
+
+    def _update_project_context(self, context: Dict[str, Any]):
+        """
+        Update project context from parsed impact-scan.md.
+
+        Args:
+            context: Metadata dict from parse_impact_scan_context()
+        """
+        if not self.project_context:
+            # Create basic project context if none exists
+            from . import project_classifier
+
+            # Determine project characteristics from context
+            project_type = context.get('project_type', 'Unknown')
+            frameworks = context.get('frameworks', [])
+
+            # Infer security context and other attributes
+            is_web_app = 'web' in project_type.lower() or any(
+                fw.lower() in ['flask', 'django', 'fastapi', 'express', 'react', 'next.js']
+                for fw in frameworks
+            )
+
+            # Infer languages from context (for now default to Python if not specified)
+            # In future, could parse file distribution from impact-scan.md
+            languages = context.get('languages', ['Python'])  # Default assumption
+
+            self.project_context = project_classifier.ProjectContext(
+                project_type=project_type,
+                frameworks=frameworks,
+                languages=languages,
+                is_library=project_type.lower() == 'library',
+                is_web_app=is_web_app,
+                description=f"Project parsed from impact-scan.md: {project_type}",
+                security_context={
+                    "handles_http": is_web_app,
+                    "processes_user_input": is_web_app,
+                }
+            )
+        else:
+            # Update existing context with parsed data
+            if 'project_type' in context:
+                self.project_context.project_type = context['project_type']
+
+            if 'frameworks' in context:
+                # Merge frameworks (avoid duplicates)
+                existing_frameworks = set(self.project_context.frameworks)
+                new_frameworks = set(context['frameworks'])
+                self.project_context.frameworks = list(existing_frameworks | new_frameworks)
+
+        logger.debug(f"Updated project context: {self.project_context.project_type}")
+
+    def build(self, context_file: Optional[Path] = None):
+        """
+        Build the knowledge graph by analyzing the codebase.
+
+        Args:
+            context_file: Optional path to impact-scan.md for enhanced context
+        """
         logger.info("Building context-aware knowledge graph...")
+
+        # Step 0: Parse impact-scan.md if available
+        if context_file and context_file.exists():
+            context = self.parse_impact_scan_context(context_file)
+            self._update_project_context(context)
 
         # Step 1: Classify files
         self._classify_files()

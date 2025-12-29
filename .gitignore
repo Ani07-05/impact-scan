@@ -163,6 +163,23 @@ demo_*.json
 /*_PLAN.md
 /*_IMPLEMENTATION.md
 
+# Strategy documents (keep private)
+DISTRIBUTION_STRATEGY.md
+POSITIONING.md
+
+# Ripgrep binaries (downloaded, not part of repo)
+ripgrep-*/
+ripgrep*.zip
+
+# Test files (temporary)
+test_bundled_build.py
+test_rg_detection.py
+test_ripgrep_scanner.py
+test_vulnerable.py
+vulnerable-test-app/
+uninstall.ps1
+uninstall.sh
+
 # Exceptions (keep important docs)
 !README.md
 !CLAUDE.md

@@ -5,10 +5,19 @@ Simplified CLI interface for Impact Scan with smart defaults and profiles.
 import asyncio
 import logging
 import re
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+
+# Fix Windows console encoding for Unicode support
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 
 import typer
 from rich.console import Console
@@ -81,7 +90,23 @@ def main(
         help="Show version and exit",
     ),
 ):
-    """Impact-Scan: AI-powered security vulnerability scanner"""
+    """
+    Impact-Scan: AI-powered security vulnerability scanner
+
+    Quick Start:
+      impact-scan scan .                  Scan current directory
+      impact-scan scan /path/to/app       Scan specific path
+
+    Common Options:
+      --min-severity HIGH                 Show only HIGH/CRITICAL issues
+      --no-ai                             Skip AI-powered analysis
+      --format html                       Generate HTML report
+
+    Examples:
+      impact-scan scan .                         # Quick scan with defaults
+      impact-scan scan . --format html           # With HTML report
+      impact-scan scan . --no-ai --min-severity CRITICAL  # Fast, critical only
+    """
     pass
 
 
@@ -329,8 +354,8 @@ def scan_command(
         console.print()  # Blank line
 
     # Auto-install missing tools (seamless experience like Claude Code)
-    auto_install = not yes  # If --yes flag, skip prompts and auto-install
-    tools_ok = ensure_scanning_tools(auto_install=auto_install, silent=False)
+    silent_mode = yes  # If --yes flag, suppress prompts
+    tools_ok = ensure_scanning_tools(silent=silent_mode)
 
     if not tools_ok:
         console.print(

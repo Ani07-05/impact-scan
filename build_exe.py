@@ -12,55 +12,168 @@ import sys
 import subprocess
 import shutil
 from pathlib import Path
+import os
+
+# Fix encoding for Windows console
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding='utf-8')
+
+def ensure_package_structure():
+    """Ensure the package has proper __init__.py files"""
+    src_path = Path("src/impact_scan")
+    init_file = src_path / "__init__.py"
+
+    if not init_file.exists():
+        print("Creating missing __init__.py...")
+        init_file.write_text('''"""
+Impact Scan - AI-powered security vulnerability scanner
+"""
+
+__version__ = "0.3.0"
+__author__ = "Anirudh"
+
+from pathlib import Path
+
+# Package metadata
+PACKAGE_ROOT = Path(__file__).parent
+
+__all__ = ["__version__", "__author__", "PACKAGE_ROOT"]
+''')
+        print("Created __init__.py")
 
 def build_executable(platform="current"):
     """Build Impact-Scan standalone executable"""
 
-    print(f"🔨 Building Impact-Scan executable for {platform}...")
+    print(f"Building Impact-Scan executable for {platform}...")
 
-    # PyInstaller command
-    cmd = [
-        "pyinstaller",
-        "--name=impact-scan",
-        "--onefile",  # Single executable
-        "--console",  # CLI tool
-        "--noconfirm",
-        "--clean",
-        # Include all necessary packages
-        "--hidden-import=impact_scan",
-        "--hidden-import=semgrep",
-        "--hidden-import=bandit",
-        "--hidden-import=textual",
-        "--hidden-import=typer",
-        "--hidden-import=openai",
-        "--hidden-import=anthropic",
-        "--hidden-import=google.generativeai",
-        "--hidden-import=groq",
-        # Entry point
-        "src/impact_scan/cli.py",
-    ]
+    # Ensure package structure is correct
+    ensure_package_structure()
 
-    # Platform-specific options
-    if platform == "windows":
-        cmd.extend([
-            "--icon=NONE",  # Add icon later
-        ])
+    # Use the simplified spec file to avoid dependency conflicts
+    spec_file = Path("impact-scan-simple.spec")
+
+    if not spec_file.exists():
+        print("Error: impact-scan-simple.spec file not found!")
+        print("Please ensure impact-scan-simple.spec exists in the project root.")
+        return False
 
     try:
-        # Install PyInstaller if not present
+        # Install PyInstaller and required packages
+        print("Installing build dependencies...")
         subprocess.run([sys.executable, "-m", "pip", "install", "pyinstaller"], check=True)
 
-        # Build executable
+        # Build executable using spec file
+        print("Building executable with PyInstaller...")
+        cmd = [
+            "pyinstaller",
+            "--clean",
+            "--noconfirm",
+            str(spec_file)
+        ]
+
         subprocess.run(cmd, check=True)
 
-        print("✅ Build successful!")
-        print(f"📦 Executable location: dist/impact-scan{'.exe' if platform == 'windows' else ''}")
+        print("Build successful!")
+        exe_name = "impact-scan.exe" if sys.platform == "win32" else "impact-scan"
+        print(f"Executable location: dist/{exe_name}")
+
+        # Create a README for the distribution
+        create_dist_readme()
 
         return True
 
     except subprocess.CalledProcessError as e:
-        print(f"❌ Build failed: {e}")
+        print(f"Build failed: {e}")
         return False
+
+def create_dist_readme():
+    """Create a README for the distribution package"""
+    readme_content = """# Impact-Scan Portable Executable
+
+This is a standalone executable of Impact-Scan that doesn't require Python to be installed.
+
+## ✨ What's Included
+
+This executable bundles all required dependencies including:
+- ✓ All Python libraries
+- ✓ Ripgrep binary (bundled for code scanning)
+- ✓ AI validation tools
+- ✓ Report generation tools
+
+**No additional installation required!** Just download and run.
+
+## Important Notes
+
+### Bundled Ripgrep
+Impact-Scan includes a bundled ripgrep binary that works out of the box.
+The tool automatically detects and uses the bundled version when running as an executable.
+
+If you want to use a system-installed ripgrep instead, you can install it:
+
+**Windows:**
+```bash
+choco install ripgrep
+# Or
+winget install BurntSushi.ripgrep.MSVC
+```
+
+**Linux:**
+```bash
+# Ubuntu/Debian
+sudo apt install ripgrep
+
+# Fedora/RHEL
+sudo dnf install ripgrep
+```
+
+**macOS:**
+```bash
+brew install ripgrep
+```
+
+### Usage
+
+```bash
+# Show help
+impact-scan --help
+
+# Run TUI mode
+impact-scan tui
+
+# Scan a project
+impact-scan scan /path/to/project
+
+# Check version
+impact-scan --version
+```
+
+### First Run
+On first run, the tool may need to download additional dependencies. This is normal.
+
+### Troubleshooting
+
+If you encounter "No module named 'impact_scan.cli'" error:
+- Make sure you're running the executable from the correct location
+- Try running from the directory where the executable is located
+
+If ripgrep is not found:
+- Install ripgrep using instructions above
+- Make sure ripgrep (rg) is in your PATH
+
+### Groq API Key (Optional)
+For AI-powered validation and fix suggestions, set the GROQ_API_KEY environment variable:
+```bash
+export GROQ_API_KEY="your-api-key"
+```
+Get a free API key from: https://console.groq.com/
+
+For more information, visit: https://github.com/Ani07-05/impact-scan
+"""
+
+    dist_path = Path("dist")
+    if dist_path.exists():
+        (dist_path / "README.txt").write_text(readme_content, encoding='utf-8')
+        print("Created distribution README")
 
 def create_installer_script():
     """Create Windows installer script using Inno Setup"""
