@@ -55,5 +55,17 @@ def eval_code():
     return {'result': result}
 
 
+@app.route('/file')
+def read_file():
+    filename = request.args.get('file')
+    with open(filename, 'r') as f:
+        return f.read()
+
+
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0')
+    # Insecure SSL context
+    import ssl
+    context = ssl.SSLContext(ssl.PROTOCOL_TLSv1)
+    context.verify_mode = ssl.CERT_NONE
+
+    app.run(debug=True, host='0.0.0.0', ssl_context=context)
