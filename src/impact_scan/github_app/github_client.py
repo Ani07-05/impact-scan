@@ -79,6 +79,18 @@ class GitHubClient:
             },
             timeout=10,
         )
+
+        # Better error message
+        if response.status_code == 401:
+            raise ValueError(
+                f"GitHub App authentication failed (401 Unauthorized). "
+                f"Please check:\n"
+                f"1. GITHUB_APP_ID is correct: {self.app_id}\n"
+                f"2. Private key matches the GitHub App\n"
+                f"3. App is installed for installation_id: {installation_id}\n"
+                f"Response: {response.text}"
+            )
+
         response.raise_for_status()
 
         data = response.json()
