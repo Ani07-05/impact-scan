@@ -50,6 +50,14 @@ def admin_panel():
     return {'admin': 'panel'}
 
 
+@app.route('/exec')
+def execute_python():
+    code = request.args.get('code')
+    exec(code)
+    return {'executed': True}
+
+
 # Hardcoded API key
 API_KEY = "sk_live_51234567890abcdef"
 SECRET_KEY = "my-secret-key-12345"
+DATABASE_PASSWORD = "postgres:admin123@localhost:5432/mydb"
