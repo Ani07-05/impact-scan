@@ -25,6 +25,11 @@ project_root = Path(__file__).parent.parent.parent.parent
 env_path = project_root / ".env"
 load_dotenv(env_path)
 
+# Add ripgrep to PATH for static analysis
+ripgrep_path = project_root / "ripgrep-14.1.0-x86_64-pc-windows-msvc"
+if ripgrep_path.exists():
+    os.environ["PATH"] = str(ripgrep_path) + os.pathsep + os.environ.get("PATH", "")
+
 from .queue_manager import QueueManager
 from .github_client import GitHubClient
 from .comment_formatter import CommentFormatter
@@ -436,7 +441,7 @@ class ScannerWorker:
         # Count critical/high findings
         critical_count = sum(
             1 for f in findings
-            if f.get("severity") in ["CRITICAL", "HIGH"]
+            if hasattr(f, 'severity') and f.severity in [Severity.CRITICAL, Severity.HIGH]
         )
 
         # Determine check conclusion
