@@ -23,7 +23,10 @@ class GitHubClient:
             private_key: GitHub App private key (PEM format). Defaults to env var GITHUB_APP_PRIVATE_KEY.
         """
         self.app_id = app_id or os.getenv("GITHUB_APP_ID")
-        self.private_key = private_key or os.getenv("GITHUB_APP_PRIVATE_KEY")
+        raw_private_key = private_key or os.getenv("GITHUB_APP_PRIVATE_KEY")
+
+        # Replace literal \n with actual newlines
+        self.private_key = raw_private_key.replace("\\n", "\n") if raw_private_key else None
 
         if not self.app_id or not self.private_key:
             raise ValueError(
@@ -76,6 +79,18 @@ class GitHubClient:
             },
             timeout=10,
         )
+
+        # Better error message
+        if response.status_code == 401:
+            raise ValueError(
+                f"GitHub App authentication failed (401 Unauthorized). "
+                f"Please check:\n"
+                f"1. GITHUB_APP_ID is correct: {self.app_id}\n"
+                f"2. Private key matches the GitHub App\n"
+                f"3. App is installed for installation_id: {installation_id}\n"
+                f"Response: {response.text}"
+            )
+
         response.raise_for_status()
 
         data = response.json()

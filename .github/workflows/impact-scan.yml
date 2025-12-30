@@ -1,12 +1,13 @@
 name: Impact-Scan Security Analysis
 
 on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main, develop ]
+  # Disabled automatic PR scanning - using GitHub App instead
+  # push:
+  #   branches: [ main, develop ]
+  # pull_request:
+  #   branches: [ main, develop ]
   schedule:
-    # Run weekly security scans
+    # Run weekly security scans on main branch
     - cron: '0 0 * * 0'
   workflow_dispatch:
     inputs:
