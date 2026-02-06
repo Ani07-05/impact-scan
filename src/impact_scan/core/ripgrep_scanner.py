@@ -68,6 +68,7 @@ def _get_ripgrep_path() -> str:
     Priority:
     1. Bundled ripgrep (if running as executable)
     2. System ripgrep (from PATH)
+    3. Auto-installed ripgrep (~/.impact-scan/tools/ripgrep)
 
     Returns:
         Path to ripgrep binary
@@ -81,18 +82,32 @@ def _get_ripgrep_path() -> str:
         logger.info(f"Using bundled ripgrep: {bundled_rg}")
         return bundled_rg
 
-    # Fall back to system ripgrep
+    # Check for system ripgrep
     system_rg = shutil.which("rg")
     if system_rg:
         logger.debug(f"Using system ripgrep: {system_rg}")
         return system_rg
 
-    # Not found anywhere
+    # Check for auto-installed ripgrep
+    if sys.platform == 'win32':
+        auto_install_dir = Path.home() / '.impact-scan' / 'tools' / 'ripgrep'
+        rg_name = 'rg.exe'
+    else:
+        auto_install_dir = Path.home() / '.local' / 'share' / 'impact-scan' / 'ripgrep'
+        rg_name = 'rg'
+    
+    auto_rg = auto_install_dir / rg_name
+    if auto_rg.exists():
+        logger.info(f"Using auto-installed ripgrep: {auto_rg}")
+        return str(auto_rg)
+
+    # Not found anywhere - raise error with helpful instructions
     raise RuntimeError(
         "ripgrep (rg) not found. Please install it:\n"
-        "  - Windows: choco install ripgrep\n"
+        "  - Windows: choco install ripgrep  or  winget install BurntSushi.ripgrep.MSVC\n"
         "  - macOS: brew install ripgrep\n"
         "  - Linux: sudo apt install ripgrep\n"
+        "Or auto-install by running: impact-scan scan (it will auto-download)\n"
         "  - Or download from: https://github.com/BurntSushi/ripgrep/releases"
     )
 

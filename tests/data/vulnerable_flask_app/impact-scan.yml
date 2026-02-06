@@ -1,0 +1,31 @@
+version: '1.0'
+project_type: Python Web App
+rules:
+- id: hardcoded-secret
+  pattern: (password|api_key|secret|token)\s*=\s*["\'][^"\']{8,}["\']
+  title: Hardcoded Secret
+  severity: HIGH
+  description: Hardcoded credentials detected
+  cwe: CWE-798
+  owasp: A07:2021
+- id: sql-injection
+  pattern: (execute|query|SELECT|INSERT|UPDATE|DELETE)\s*\(\s*["\'].*%s.*["\']
+  title: SQL Injection Risk
+  severity: CRITICAL
+  description: Potential SQL injection vulnerability
+  cwe: CWE-89
+  owasp: A03:2021
+- id: command-injection
+  pattern: (exec|eval|system|popen|subprocess)\s*\(
+  title: Command Injection Risk
+  severity: HIGH
+  description: Potential command injection vulnerability
+  cwe: CWE-78
+  owasp: A03:2021
+- id: path-traversal
+  pattern: (open|read|write)\s*\(.*\.\./.*\)
+  title: Path Traversal Risk
+  severity: MEDIUM
+  description: Potential path traversal vulnerability
+  cwe: CWE-22
+  owasp: A01:2021

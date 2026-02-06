@@ -8,10 +8,14 @@ Handles:
 """
 
 import logging
+import os
 import shutil
 import subprocess
 import sys
+import zipfile
+from pathlib import Path
 from typing import Optional, Tuple
+from urllib.request import urlopen
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -53,17 +57,128 @@ class DependencyInstaller:
         """
         return shutil.which(tool_name) is not None
 
+    def _get_ripgrep_install_dir(self) -> Path:
+        """Get the directory where ripgrep should be installed."""
+        if sys.platform == 'win32':
+            # Use user's local bin directory on Windows
+            base = Path.home() / '.impact-scan' / 'tools' / 'ripgrep'
+        else:
+            # Use ~/.local/bin on Unix-like systems
+            base = Path.home() / '.local' / 'share' / 'impact-scan' / 'ripgrep'
+        
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+
+    def _download_ripgrep(self) -> Optional[str]:
+        """
+        Auto-download and install ripgrep.
+        
+        Returns:
+            Path to rg executable if successful, None otherwise
+        """
+        import platform
+        
+        # Determine download URL based on platform and architecture
+        machine = platform.machine().lower()
+        system = sys.platform
+        
+        if system == 'win32':
+            if machine in ('amd64', 'x86_64'):
+                url = 'https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep-14.1.0-x86_64-pc-windows-msvc.zip'
+                rg_name = 'rg.exe'
+            else:
+                return None
+        elif system == 'darwin':  # macOS
+            if machine == 'arm64':
+                url = 'https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep-14.1.0-aarch64-apple-darwin.tar.gz'
+            else:
+                url = 'https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep-14.1.0-x86_64-apple-darwin.tar.gz'
+            rg_name = 'rg'
+        elif system.startswith('linux'):
+            if machine in ('amd64', 'x86_64'):
+                url = 'https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz'
+            elif machine == 'aarch64':
+                url = 'https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep-14.1.0-aarch64-unknown-linux-musl.tar.gz'
+            else:
+                return None
+            rg_name = 'rg'
+        else:
+            return None
+        
+        try:
+            install_dir = self._get_ripgrep_install_dir()
+            self._print(f"\n[cyan]Downloading ripgrep...[/cyan]")
+            
+            # Download the file
+            import tempfile
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmpdir_path = Path(tmpdir)
+                download_path = tmpdir_path / 'ripgrep-archive'
+                
+                # Download with progress
+                with urlopen(url) as response:
+                    total_size = int(response.headers.get('content-length', 0))
+                    downloaded = 0
+                    chunk_size = 8192
+                    
+                    with open(download_path, 'wb') as f:
+                        while True:
+                            chunk = response.read(chunk_size)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total_size > 0 and not self.silent:
+                                percent = (downloaded / total_size) * 100
+                                logger.debug(f"Downloaded {percent:.1f}%")
+                
+                # Extract the archive
+                if url.endswith('.zip'):
+                    with zipfile.ZipFile(download_path, 'r') as zip_ref:
+                        zip_ref.extractall(tmpdir_path)
+                else:  # tar.gz
+                    import tarfile
+                    with tarfile.open(download_path, 'r:gz') as tar_ref:
+                        tar_ref.extractall(tmpdir_path)
+                
+                # Find the rg executable in the extracted files
+                rg_path = None
+                for root, dirs, files in os.walk(tmpdir_path):
+                    if rg_name in files:
+                        rg_path = Path(root) / rg_name
+                        break
+                
+                if not rg_path or not rg_path.exists():
+                    logger.error("Could not find rg executable in downloaded archive")
+                    return None
+                
+                # Copy to install directory
+                final_path = install_dir / rg_name
+                shutil.copy2(rg_path, final_path)
+                
+                # Make executable on Unix
+                if sys.platform != 'win32':
+                    os.chmod(final_path, 0o755)
+                
+                logger.info(f"Ripgrep installed to: {final_path}")
+                self._print(f"[green]✓ Ripgrep installed successfully[/green]")
+                return str(final_path)
+                
+        except Exception as e:
+            logger.error(f"Failed to auto-download ripgrep: {e}")
+            self._print(f"[red]Failed to download ripgrep: {e}[/red]")
+            return None
+
     def ensure_ripgrep(self) -> Tuple[bool, str]:
         """
         Ensure ripgrep is installed.
+        
+        Will attempt to auto-download ripgrep if not found in system PATH.
 
         Returns:
             Tuple of (available: bool, message: str)
         """
         # First check for bundled ripgrep (for executable distributions)
-        import sys
-        from pathlib import Path
-
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
             # Running as PyInstaller bundle - check for bundled ripgrep
             bundle_dir = Path(sys._MEIPASS)
@@ -91,10 +206,40 @@ class DependencyInstaller:
                 logger.warning(f"ripgrep found but version check failed: {e}")
                 return True, "ripgrep is available (version unknown)"
 
-        # Not installed - provide installation instructions
-        self._print("\n[yellow][WARNING] ripgrep (rg) not found[/yellow]")
-        self._print("ripgrep is required for static code analysis")
-        self._print("\nInstallation instructions:")
+        # Check if we previously downloaded ripgrep to ~/.impact-scan/tools
+        install_dir = self._get_ripgrep_install_dir()
+        rg_name = 'rg.exe' if sys.platform == 'win32' else 'rg'
+        local_rg = install_dir / rg_name
+        
+        if local_rg.exists():
+            try:
+                result = subprocess.run(
+                    [str(local_rg), "--version"], capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    # Add to PATH for this process
+                    if str(install_dir) not in os.environ.get('PATH', ''):
+                        os.environ['PATH'] = str(install_dir) + os.pathsep + os.environ.get('PATH', '')
+                    logger.info(f"Found locally installed ripgrep at: {local_rg}")
+                    return True, f"ripgrep is available (local install)"
+            except Exception as e:
+                logger.warning(f"Local ripgrep exists but failed to verify: {e}")
+
+        # Not found - attempt auto-download
+        self._print("\n[yellow]ripgrep not found in system PATH[/yellow]")
+        self._print("[cyan]Attempting to auto-download ripgrep...[/cyan]")
+        
+        rg_path = self._download_ripgrep()
+        if rg_path:
+            # Add to PATH for this process
+            install_dir = Path(rg_path).parent
+            if str(install_dir) not in os.environ.get('PATH', ''):
+                os.environ['PATH'] = str(install_dir) + os.pathsep + os.environ.get('PATH', '')
+            return True, "ripgrep auto-installed successfully"
+        
+        # Failed to auto-install - provide manual instructions
+        self._print("\n[red]Failed to auto-download ripgrep[/red]")
+        self._print("[yellow]Please install ripgrep manually:[/yellow]")
         self._print("  Windows:  choco install ripgrep  or  winget install BurntSushi.ripgrep.MSVC")
         self._print("  macOS:    brew install ripgrep")
         self._print("  Linux:    sudo apt install ripgrep  (Ubuntu/Debian)")
