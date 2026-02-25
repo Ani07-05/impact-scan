@@ -352,26 +352,80 @@ class ScannerWorker:
         logger.info(f"Posted initial comment {comment_id}")
         return comment_id
 
-    def generate_basic_mermaid(self, changed_files: list[str]) -> str:
-        """Generate basic Mermaid diagram showing changed files.
+    def generate_basic_mermaid(self, changed_files: list[str], findings: list = None) -> str:
+        """Generate Mermaid diagram showing file relationships and issue density.
 
         Args:
             changed_files: List of changed file paths
+            findings: Optional list of Finding objects to show issue density
 
         Returns:
             Mermaid diagram code
         """
-        # Simple file list for now - TODO: add relationships
-        nodes = []
-        for i, filepath in enumerate(changed_files[:10]):  # Limit to 10 files
-            filename = filepath.split("/")[-1]
-            nodes.append(f"    {chr(65+i)}[{filename}]")
+        # Group files by directory
+        file_groups = {}
+        for filepath in changed_files[:15]:  # Limit to 15 files
+            parts = filepath.split("/")
+            if len(parts) > 1:
+                dir_name = parts[-2]
+                filename = parts[-1]
+            else:
+                dir_name = "root"
+                filename = filepath
 
-        if len(changed_files) > 10:
-            nodes.append(f"    ...[+{len(changed_files)-10} more files]")
+            if dir_name not in file_groups:
+                file_groups[dir_name] = []
+            file_groups[dir_name].append((filepath, filename))
 
-        diagram = "graph LR\n" + "\n".join(nodes)
-        return diagram
+        # Count issues per file
+        issue_count = {}
+        if findings:
+            for finding in findings:
+                file_path = str(finding.file_path) if hasattr(finding, 'file_path') else ""
+                issue_count[file_path] = issue_count.get(file_path, 0) + 1
+
+        # Build diagram
+        lines = ["graph TD"]
+
+        # Add nodes for each directory
+        dir_ids = {}
+        for idx, dir_name in enumerate(file_groups.keys()):
+            dir_id = f"DIR{idx}"
+            dir_ids[dir_name] = dir_id
+            lines.append(f"    {dir_id}[📁 {dir_name}]")
+            lines.append(f"    style {dir_id} fill:#e1f5ff,stroke:#0288d1")
+
+        # Add file nodes with issue indicators
+        file_counter = 0
+        for dir_name, files in file_groups.items():
+            dir_id = dir_ids[dir_name]
+            for filepath, filename in files:
+                file_id = f"F{file_counter}"
+                file_counter += 1
+
+                # Determine file style based on issues
+                issues = issue_count.get(filepath, 0)
+                if issues >= 3:
+                    style = "fill:#ffebee,stroke:#c62828"  # Red for high issues
+                    icon = "🔴"
+                elif issues > 0:
+                    style = "fill:#fff3e0,stroke:#ef6c00"  # Orange for some issues
+                    icon = "🟠"
+                else:
+                    style = "fill:#e8f5e9,stroke:#2e7d32"  # Green for clean
+                    icon = "🟢"
+
+                issue_text = f" ({issues})" if issues > 0 else ""
+                lines.append(f"    {file_id}[\"{icon} {filename}{issue_text}\"]")
+                lines.append(f"    style {file_id} {style}")
+                lines.append(f"    {dir_id} --> {file_id}")
+
+        # Add note for truncated files
+        if len(changed_files) > 15:
+            lines.append(f"    MORE[\"... +{len(changed_files)-15} more files\"]")
+            lines.append(f"    style MORE fill:#f5f5f5,stroke:#999")
+
+        return "\n".join(lines)
 
     def update_final_comment(
         self,
@@ -395,7 +449,10 @@ class ScannerWorker:
         formatter = CommentFormatter(tier=tier)
 
         # Generate Mermaid diagram with findings
-        mermaid_diagram = self.generate_basic_mermaid(scan_results["changed_files"])
+        mermaid_diagram = self.generate_basic_mermaid(
+            scan_results["changed_files"],
+            findings=scan_results["findings"]
+        )
 
         # Mock validation stats for now
         validation_stats = {
@@ -421,6 +478,72 @@ class ScannerWorker:
         )
 
         logger.info(f"Updated final comment {comment_id}")
+
+    def post_inline_comments(
+        self,
+        installation_id: int,
+        repo_full_name: str,
+        pr_number: int,
+        head_sha: str,
+        findings: list,
+    ):
+        """Post inline review comments for all findings.
+
+        Args:
+            installation_id: GitHub App installation ID
+            repo_full_name: Full repo name (owner/repo)
+            pr_number: Pull request number
+            head_sha: Git commit SHA
+            findings: List of Finding objects
+        """
+        logger.info(f"Posting inline comments for {len(findings)} findings...")
+
+        posted_count = 0
+        failed_count = 0
+
+        for finding in findings:
+            try:
+                # Skip if no line number
+                if not hasattr(finding, 'line_number') or not finding.line_number:
+                    continue
+
+                # Format inline comment body
+                severity_emoji = {
+                    Severity.CRITICAL: "🔴",
+                    Severity.HIGH: "🟠",
+                    Severity.MEDIUM: "🟡",
+                    Severity.LOW: "🔵",
+                }.get(finding.severity, "ℹ️")
+
+                comment_body = f"""{severity_emoji} **{finding.severity.name}**: {finding.title}
+
+{finding.description}
+
+**Location:** Line {finding.line_number}
+"""
+
+                # Add fix suggestion if available
+                if hasattr(finding, 'fix') and finding.fix:
+                    comment_body += f"\n**Suggested Fix:**\n```python\n{finding.fix}\n```"
+
+                # Post the comment
+                self.github_client.post_review_comment(
+                    installation_id=installation_id,
+                    repo_full_name=repo_full_name,
+                    pr_number=pr_number,
+                    commit_id=head_sha,
+                    path=str(finding.file_path),
+                    line=finding.line_number,
+                    body=comment_body,
+                )
+
+                posted_count += 1
+
+            except Exception as e:
+                logger.warning(f"Failed to post inline comment for {finding.file_path}:{finding.line_number}: {e}")
+                failed_count += 1
+
+        logger.info(f"Posted {posted_count} inline comments ({failed_count} failed)")
 
     def create_check_run(
         self,
@@ -532,6 +655,15 @@ class ScannerWorker:
                 scan_results=scan_results,
                 tier=tier,
                 truncated=truncated,
+            )
+
+            # Post inline comments for findings
+            self.post_inline_comments(
+                installation_id=installation_id,
+                repo_full_name=repo_full_name,
+                pr_number=pr_number,
+                head_sha=head_sha,
+                findings=scan_results["findings"],
             )
 
             # Create check run

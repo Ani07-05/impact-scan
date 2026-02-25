@@ -143,6 +143,11 @@ Scanned **{file_count} files** in **{scan_duration_s:.1f}s**
         high_count = sum(1 for f in bugs_security if f.severity == Severity.HIGH)
         medium_count = sum(1 for f in bugs_security if f.severity == Severity.MEDIUM)
 
+        # Count by category
+        security_count = sum(1 for f in bugs_security if "injection" in f.title.lower() or "xss" in f.title.lower() or "sql" in f.title.lower() or "command" in f.title.lower())
+        code_quality_count = sum(1 for f in bugs_security if "unused" in f.title.lower() or "complexity" in f.title.lower() or "duplicate" in f.title.lower())
+        best_practices_count = sum(1 for f in bugs_security if "hardcoded" in f.title.lower() or "secret" in f.title.lower() or "password" in f.title.lower())
+
         # Build title
         issue_count = len(bugs_security)
         title_suffix = "" if self.tier == "free" else " + Polish Suggestions (Pro)"
@@ -152,27 +157,40 @@ Scanned **{file_count} files** in **{scan_duration_s:.1f}s**
 
         # Header
         if self.tier == "pro":
-            comment_parts.append(f"## Impact Scan Pro - Found {issue_count} Issues{title_suffix}")
+            comment_parts.append(f"## 🔍 Impact Scan Pro - Code Review Complete{title_suffix}")
         else:
-            comment_parts.append(f"## Impact Scan - Found {issue_count} Issues")
+            comment_parts.append(f"## 🔍 Impact Scan - Code Review Complete")
 
-        comment_parts.append(f"\nScanned **{file_count} files** in **{scan_duration_s:.1f}s**")
+        comment_parts.append(f"\nScanned **{file_count} files** in **{scan_duration_s:.1f}s** • Found **{issue_count} issues**")
 
         if truncated:
             comment_parts.append(f"\n⚠️ Large PR detected - scanned first {file_count} files only")
 
-        comment_parts.append(
-            f"\n**Validation:** Found {total_found} potential issues, validated {validated} as actionable ({filtered} false positives filtered)"
-        )
+        # Summary Table
+        comment_parts.append("\n### 📊 Summary")
+        comment_parts.append("\n| Metric | Count | Details |")
+        comment_parts.append("|--------|-------|---------|")
+        comment_parts.append(f"| 🔴 Critical | {critical_count} | Requires immediate attention |")
+        comment_parts.append(f"| 🟠 High | {high_count} | Should be fixed before merge |")
+        comment_parts.append(f"| 🟡 Medium | {medium_count} | Consider fixing |")
+        comment_parts.append(f"| 🛡️ Security | {security_count} | Vulnerabilities found |")
+        comment_parts.append(f"| 📝 Code Quality | {code_quality_count} | Maintainability issues |")
+        comment_parts.append(f"| ✨ Best Practices | {best_practices_count} | Standards violations |")
+        comment_parts.append(f"| ✅ Files Scanned | {file_count} | Total files analyzed |")
+
+        # Validation stats
+        if total_found > 0:
+            accuracy = (validated / total_found * 100) if total_found > 0 else 0
+            comment_parts.append(f"| 🎯 Accuracy | {accuracy:.1f}% | {filtered} false positives filtered |")
 
         # File impact map
-        comment_parts.append("\n### File Impact Map")
+        comment_parts.append("\n### 📁 File Impact Map")
         comment_parts.append(f"```mermaid\n{mermaid_diagram}\n```")
 
         if self.tier == "free":
-            comment_parts.append("🔴 Critical/High Issue | 🟠 Medium Issue | Green: Clean")
+            comment_parts.append("🔴 Critical/High Issue | 🟠 Medium Issue | 🟢 Clean")
         else:
-            comment_parts.append("🔴 Critical/High | 🟠 Medium | ⚡ Polish suggestions | Green: Clean")
+            comment_parts.append("🔴 Critical/High | 🟠 Medium | ⚡ Polish suggestions | 🟢 Clean")
 
         comment_parts.append("\n---")
 
